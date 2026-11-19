@@ -264,8 +264,8 @@ async function refreshPaperTrading(){
   const d=await api('/api/trading/state');
   $('paperCash').textContent=money2(d.cash);$('paperEquity').textContent=money2(d.equity);
   $('paperRealised').textContent=(d.realisedToday<0?'-':'+')+money2(Math.abs(d.realisedToday));
-  $('paperRisk').textContent=d.killSwitch?'KILL SWITCH ON':(d.realisedToday<=-d.dailyLossLimit?'DAILY LOSS LIMIT':'Protected');
-  $('paperRisk').className='v '+(d.killSwitch||d.realisedToday<=-d.dailyLossLimit?'red':'green');
+  $('paperRisk').textContent=d.killSwitch?'KILL SWITCH ON':(d.dailyPnl<=-d.dailyLossLimit?'DAILY LOSS LIMIT':'Protected');
+  $('paperRisk').className='v '+(d.killSwitch||d.dailyPnl<=-d.dailyLossLimit?'red':'green');
   $('paperMarketPrice').textContent=quote?'Latest '+usd(quote.c):'Market price unavailable';
   $('paperBotStatus').textContent=d.bot.running?'ARMED':'STOPPED';
   $('paperBotMessage').textContent=d.bot.lastAction?(d.bot.lastAction.status+' · '+(d.bot.lastAction.reason||('Triggered at '+usd(d.bot.lastAction.price)))):'One-shot bot waits for its configured trigger.';
