@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const { createTradingRouter } = require('./trading');
 
 const app = express();
 const server = http.createServer(app);
@@ -55,15 +54,12 @@ async function getQuote(symbol = DEFAULT_SYMBOL) {
   if (!data || !Number.isFinite(Number(data.c)) || Number(data.c) <= 0) throw Error('Finnhub has no valid quote for ' + symbol + '. Check symbol coverage and market-data permissions.');
   return data;
 }
-const paperTrading = createTradingRouter({ getQuote, symbol: DEFAULT_SYMBOL });
-app.use('/api/trading', paperTrading.router);
 
 function markTrade(trade) {
   const price = Number(trade.p);
   const timestamp = Number(trade.t) || Date.now();
   if (!Number.isFinite(price) || price <= 0) return;
   lastPrice = price;
-  paperTrading.onPrice(price);
   if (!firstTrade) {
     firstTrade = { price, timestamp: new Date(timestamp).toISOString(), provider: 'Finnhub trade WebSocket' };
     broadcast({ type: 'first_trade', price, timestamp: firstTrade.timestamp });
@@ -179,7 +175,6 @@ app.get('/api/quote', rateLimit, async (req, res) => {
   try { symbol = symbolOf(req.query.symbol); } catch (error) { return res.status(400).json({ error: error.message }); }
   try {
     const quote = await getQuote(symbol);
-    if (symbol === DEFAULT_SYMBOL) paperTrading.onPrice(Number(quote.c));
     lastCheck = new Date().toISOString();
     if (!lastPrice && Number(quote.c) > 0) lastPrice = Number(quote.c);
     res.setHeader('Cache-Control', 'no-store');
