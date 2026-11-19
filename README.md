@@ -69,3 +69,61 @@ Open `https://YOUR_DOMAIN/api/health` in a browser. A healthy response is JSON w
 - A configured Finnhub token does not prove that quote or WebSocket permissions are enabled. Check the server logs and provider plan for feed errors.
 
 The frontend now displays backend response details and points to `/api/health` instead of showing only a generic failed-request message.
+
+
+## Fixing `storageWritable: false` / `EACCES`
+
+This health result means the Node.js process can serve HTTP and connect to Finnhub, but the operating-system user running Node cannot create a file in the configured data directory. Telegram being false is a separate setting and does not cause the storage error.
+
+The server now supports an optional `DATA_DIR` environment variable. If omitted, it uses the repository's `data/` directory. `/api/health` reports the resolved `storageDirectory`, and server startup logs whether that directory is writable.
+
+### 1. Identify the storage path and service user
+
+Open `https://YOUR_DOMAIN/api/health` and note `storageDirectory`. On the server, identify how the app is running:
+
+**Docker**
+```bash
+docker ps
+docker exec -it YOUR_CONTAINER_NAME sh -lc 'id; ls -ld /app /app/data 2>/dev/null || true'
+```
+
+If your app is not mounted at `/app`, use the application path shown by your deployment. The health endpoint reports the actual resolved data path.
+
+**PM2 / systemd / native Node**
+```bash
+ps -eo user,group,pid,args | grep '[n]ode server.js'
+```
+
+### 2. Grant write permission
+
+**Docker container where the Node process runs as the standard `node` user and data path is `/app/data`:**
+```bash
+docker exec -u 0 YOUR_CONTAINER_NAME sh -lc 'mkdir -p /app/data && chown -R node:node /app/data && chmod 750 /app/data'
+docker restart YOUR_CONTAINER_NAME
+```
+
+If `/app/data` is a bind-mounted host directory, the ownership change applies to that mounted directory. If the volume is mounted read-only, change the Docker Compose volume mount to read-write; `chown` cannot fix a read-only mount.
+
+**Native Node/PM2/systemd:** replace `APP_USER`, `APP_GROUP`, and `/absolute/path/to/ant/data` with the user/group running Node and the resolved data directory:
+```bash
+sudo install -d -o APP_USER -g APP_GROUP -m 750 /absolute/path/to/ant/data
+```
+
+### 3. Optional: use a dedicated persistent directory
+
+Add a writable absolute path to the private `.env` file, for example:
+```dotenv
+DATA_DIR=/var/lib/ant-tracker
+```
+Create that directory and grant ownership to the Node service user before restarting. For Docker, mount a persistent read-write volume at the same path. Do not put this data directory in a temporary container filesystem if you need alerts and first-trade state to survive container replacement.
+
+### 4. Verify
+
+After restart, open `/api/health` again. The required result is:
+- `storageWritable: true`
+- `storageError: null`
+- `storageDirectory`: the intended persistent path
+
+Then add a low-risk test alert from the dashboard and refresh the page; the alert should still appear. Remove the test alert afterwards.
+
+Do not use `chmod 777` as a permanent fix. Give the Node service user ownership and only the permissions it needs.
