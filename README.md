@@ -1,85 +1,47 @@
-# Anthropic IPO Portfolio Tracker
+# Anthropic ANT IPO Portfolio Tracker
 
-A Node.js-backed dashboard for tracking an assumed Anthropic (Nasdaq: ANT) position in USD and NPR. The frontend never receives the Finnhub API token: the server reads it from a private `.env` file and proxies REST quote snapshots and the Finnhub trade WebSocket.
+A personal Node.js dashboard for the assumed 38-share position, with a persistent Finnhub trade WebSocket, one-minute quote checks for November 19, 2026, live trade chart, first-trade detection, and server-persisted price alerts.
 
-## Starting portfolio assumptions
-- Shares: 38
-- IPO reference cost: USD 83.00/share
-- Fixed USD/NPR: NPR 149.21
-- Starting cost basis: USD 3,154.00 (NPR 470,608.34)
+## Install and run
+```bash
+npm install
+cp .env.example .env
+# edit .env and add your Finnhub API key
+npm start
+``
+Open http://localhost:3000. Use Node.js 20+ and a host that keeps a Node process alive and supports outbound WebSockets. GitHub Pages alone cannot run this server.
 
-These are editable assumptions. Confirm actual allocation, executed quantity, fees and cost basis in Revolut.
+## .env variables
+```dotenv
+FINNHUB_API_KEY=your_finnhub_api_token
+STOCK_SYMBOL=ANT
+PORT=3000
+QUOTE_REFRESH_SECONDS=60
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+``
+The server reads the Finnhub key privately. Never commit .env. For hosted deployment, set these as private environment variables in the hosting provider.
 
-## Features
-- Server-side Finnhub REST quote proxy; API key is not exposed to browsers.
-- Server-side Finnhub WebSocket relay for trade ticks where provider entitlements allow.
-- Quote timestamp, open, previous close, high, low and volume fields.
-- Portfolio value, unrealised P/L, return and daily P/L in USD/NPR.
-- Fixed FX conversion of NPR 149.21 per USD.
-- Editable shares, average cost, additional-buy planner and blended-cost calculator.
-- User-editable bear/base/bull scenarios (not forecasts).
-- TradingView chart embed.
-- Browser persistence for share count and average cost only.
+## Telegram alerts setup (recommended)
+1. In Telegram, open **@BotFather**, send `/newbot`, follow the prompts and copy the bot token.
+2. Open your new bot's chat and press **Start** (or send `/start`).
+3. To obtain your chat ID, open `https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates` in a browser after sending the bot a message. Find `message.chat.id` in the JSON response.
+4. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the private `.env` file, then restart the app.
+5. Never share the token or commit it. Test with a price alert close to the current price, then remove it.
 
-## Requirements
-- Node.js 20 or later.
-- Finnhub API token with access to quote snapshots and the relevant US-equity trade stream.
-- Hosting that supports a persistent Node.js process and WebSocket upgrades. GitHub Pages alone cannot run this backend or keep API credentials private.
+## Today's monitoring
+The server keeps one Finnhub trade WebSocket connection open independently of the browser. The first valid ANT trade event is persisted in `data/market-state.json` and triggers a Telegram alert (if configured) and a browser event. A one-minute REST quote check runs only on November 19, 2026 during the US regular session, 9:30 a.m.–4:00 p.m. America/New_York. This quote polling is a fallback for prices/thresholds; **first-trade confirmation is based on an actual provider trade event**, not a quote, listing record or indicative price.
 
-## Setup
-1. Clone/download this repository.
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create your private environment file:
+The first-trade event means a trade was reported by Finnhub. It does not confirm that a user's Revolut order executed. Confirm execution in Revolut.
 
-   Linux/macOS:
-   ```bash
-   cp .env.example .env
-   ```
+## Price alerts
+Add above/below thresholds in the dashboard. Alerts are saved to `data/alerts.json` on the server and evaluated against incoming trade ticks and one-minute quote snapshots. Once alerts trigger once; repeat alerts trigger again on a new crossing. Data files are local to the host; back them up if needed.
 
-   Windows PowerShell:
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+## Live chart
+The intraday chart is drawn from incoming Finnhub trade events using Chart.js. It updates when events arrive. It will remain empty until a real trade event is received; no synthetic prices or pre-market indications are drawn as executed trades.
 
-4. Edit `.env` and replace the placeholder with your real Finnhub token:
-   ```dotenv
-   FINNHUB_API_KEY=your_actual_finnhub_token
-   STOCK_SYMBOL=ANT
-   PORT=3000
-   QUOTE_REFRESH_SECONDS=30
-   ```
-5. Start:
-   ```bash
-   npm start
-   ```
-6. Open http://localhost:3000.
+## Market data and Yahoo Finance
+Yahoo Finance does not offer a documented public real-time developer API. Its web endpoints are unofficial, can change, and may be subject to Yahoo's terms and rate limits. Do not rely on them for execution decisions. Finnhub's trade WebSocket is the current provider integration; confirm your Finnhub plan includes real-time Nasdaq/ANT trades and quote access. Provider delivery is not a guarantee of exchange-level millisecond latency or a complete consolidated tape.
 
-Use `npm run dev` for Node's watch mode during development.
-
-## Environment variables
-
-| Variable | Required | Default | Purpose |
-|---|---:|---|---|
-| `FINNHUB_API_KEY` | Yes | — | Private Finnhub token, read only by Node server |
-| `STOCK_SYMBOL` | No | `ANT` | Default ticker |
-| `PORT` | No | `3000` | HTTP server port |
-| `QUOTE_REFRESH_SECONDS` | No | `30` | Snapshot polling interval, clamped to 10–300 seconds |
-
-Never put a real key in `.env.example`, frontend files, GitHub Actions logs or commits. `.env` is excluded by `.gitignore`. For production, add these variables using your hosting provider's private environment-variable/secret settings rather than uploading a local `.env` file.
-
-## Endpoints
-- `GET /api/health` — process health.
-- `GET /api/config` — safe public configuration only; never returns the key.
-- `GET /api/quote?symbol=ANT` — server-side Finnhub quote proxy.
-- `/ws?symbol=ANT` — same-origin WebSocket relay for Finnhub trade events.
-
-The server validates ticker syntax, rate-limits quote requests per client IP and applies provider request timeouts.
-
-## Market-data limitations
-WebSocket events arrive as the upstream provider publishes them; this does not guarantee millisecond exchange latency or a complete consolidated tape. Real-time/delayed status, symbol availability, rate limits and exchange permissions depend on the Finnhub subscription and applicable Nasdaq market-data entitlements. Confirm that your plan covers Nasdaq/ANT. If Finnhub returns no valid quote, the dashboard displays an error rather than inventing a price. TradingView is an independent source and may have different coverage/delay.
-
-## Calculations and risk
-Invested cost = shares × average cost. Market value = latest valid provider price × shares. Unrealised P/L = market value − invested cost. NPR = USD × 149.21. The FX rate is fixed as requested and excludes bank spreads, commissions, taxes and currency costs. The buy planner changes the local calculator only; it does not place a Revolut order or sync holdings. Scenarios are what-if calculations, not price predictions or investment advice. IPO trading can be volatile.
+## Portfolio assumptions and risk
+Default editable holding: 38 shares at USD 83.00/share. Fixed FX: NPR 149.21/USD. These are assumptions; verify allocation, fills, fees and average cost in Revolut. The planner does not place orders or connect to Revolut. IPO opening prices can be highly volatile, with wide spreads and trading halts. Consider limit orders and confirm current broker availability, order rules and market status before trading.
