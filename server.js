@@ -20,6 +20,8 @@ let reconnectTimer = null;
 let firstTrade = null;
 let lastPrice = null;
 let lastCheck = null;
+let fxCache={rate:null,date:null,fetchedAt:0};
+
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '10kb' }));
@@ -115,6 +117,23 @@ app.get('/api/config', (_req, res) => res.json({
   providerConfigured: Boolean(API_KEY),
   fxUsdNpr: FX_RATE
 }));
+app.get('/api/fx', async (_req, res) => {
+  try {
+    if (!fxCache.rate || Date.now() - fxCache.fetchedAt > 3600000) {
+      const response = await fetch('https://api.frankfurter.dev/v2/rate/usd/eur', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(7000) });
+      if (!response.ok) throw Error('FX provider returned HTTP ' + response.status);
+      const data = await response.json();
+      if (!Number.isFinite(Number(data.rate)) || Number(data.rate) <= 0) throw Error('Invalid USD/EUR reference rate');
+      fxCache = { rate: Number(data.rate), date: data.date, fetchedAt: Date.now() };
+    }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json({ base: 'USD', quote: 'EUR', usdEur: fxCache.rate, date: fxCache.date, source: 'Frankfurter reference rates', fetchedAt: new Date(fxCache.fetchedAt).toISOString() });
+  } catch (error) {
+    console.error('FX reference rate unavailable:', error.message);
+    if (fxCache.rate) return res.json({ base: 'USD', quote: 'EUR', usdEur: fxCache.rate, date: fxCache.date, source: 'Frankfurter cached reference rate', stale: true });
+    res.status(502).json({ error: 'USD/EUR reference rate unavailable.' });
+  }
+});
 app.get('/api/status', (_req, res) => res.json({
   tradingLive: Boolean(firstTrade),
   firstTrade,
