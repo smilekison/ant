@@ -111,8 +111,10 @@ function createTradingRouter({ getQuote, symbol }) {
     if (!Number.isFinite(price) || price <= 0) return;
     lastPrice = price;
     let changed = false;
+    if (dailyPnl() <= -limits.dailyLossLimit) { for (const order of state.orders) if (order.status === 'PENDING') { order.status = 'REJECTED'; order.reason = 'Daily loss guard reached before fill.'; changed = true; } }
     for (const order of state.orders) {
       if (order.status !== 'PENDING' || order.type !== 'LIMIT') continue;
+      if (dailyPnl() <= -limits.dailyLossLimit) continue;
       const crossed = order.side === 'BUY' ? price <= order.limitPrice : price >= order.limitPrice;
       if (!crossed) continue;
       try {
