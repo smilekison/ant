@@ -5,3 +5,7 @@ node_modules/
 npm-debug.log*
 .DS_Store
 data/
+
+# Private paper trading state
+/data/
+*.tmp
