@@ -55,6 +55,20 @@
 <div class="scenario"><div class="eyebrow">Bear scenario · USD</div><div class="field"><input id="bear" type="number" step=".01" value="75"></div><div class="result" id="bearResult">—</div><div class="sub">P/L vs invested cost</div></div>
 <div class="scenario"><div class="eyebrow">Base scenario · USD</div><div class="field"><input id="base" type="number" step=".01" value="100"></div><div class="result" id="baseResult">—</div><div class="sub">P/L vs invested cost</div></div>
 <div class="scenario"><div class="eyebrow">Bull scenario · USD</div><div class="field"><input id="bull" type="number" step=".01" value="120"></div><div class="result" id="bullResult">—</div><div class="sub">P/L vs invested cost</div></div></div><div class="note">These are user-editable what-if prices. This app does not claim to forecast Anthropic's share price. IPO opening auctions can be volatile, and an indication is not an executable price.</div></section>
+<section class="section card" id="flowModel"><div class="head"><h2>Supply / demand pulse & 5-minute outlook</h2><span class="sub" id="flowUpdated">Waiting for trade data</span></div>
+<div class="metrics" style="margin:0 0 12px">
+<div class="metric"><div class="eyebrow">Estimated buying pressure</div><div class="v" id="buyPressure">—</div><div class="sub">Tick-rule volume share</div></div>
+<div class="metric"><div class="eyebrow">Estimated selling pressure</div><div class="v" id="sellPressure">—</div><div class="sub">Tick-rule volume share</div></div>
+<div class="metric"><div class="eyebrow">Trades / last 60 sec</div><div class="v" id="flowTrades">—</div><div class="sub">Observed trade prints</div></div>
+<div class="metric"><div class="eyebrow">1-minute move</div><div class="v" id="flowMove">—</div><div class="sub">From first to latest tick</div></div>
+</div>
+<div class="grid2">
+<div class="scenario"><div class="eyebrow">Model outlook · next 5 minutes</div><div class="result" id="flowForecast">Collecting trade prints…</div><div class="sub" id="flowConfidence">A directional estimate, not a target price</div></div>
+<div class="scenario"><div class="eyebrow">Forecast vs actual · 5-minute horizon</div><div class="result" id="flowAccuracy">No forecast settled yet</div><div class="sub" id="flowAccuracyDetail">A forecast is checked against the price five minutes later.</div></div>
+</div>
+<div class="row"><span class="muted">Estimated net pressure</span><strong id="netPressure">—</strong></div>
+<div class="row"><span class="muted">Last forecast reference price</span><strong id="forecastReference">—</strong></div>
+<div class="note">This is a fast, transparent tape-based estimate using recent trade prints, price direction and reported trade size. It is not a true Level 2 order-book imbalance: Finnhub's current trade stream does not provide full bid/ask depth or reliably identify the aggressor for every trade. A tick-rule estimate can misclassify trades. Forecasts are experimental and may be wrong; do not treat them as trading signals.</div></section>
 <section class="section card"><div class="head"><h2>ANT live trade chart</h2><span class="sub" id="chartStatus">Waiting for first confirmed trade tick</span></div><div style="height:320px;position:relative"><canvas id="liveChart" aria-label="ANT live intraday price chart"></canvas></div><div class="note">This chart is built from Finnhub trade events relayed by your server. It updates as ticks arrive; if the provider has no trades yet, the chart correctly remains empty. Exchange data entitlement and provider latency apply.</div></section>
 
 <section class="section card"><div class="head"><h2>Trading status monitor</h2><span class="sub">Live market status · New York time</span></div><div class="rows"><div><div class="row"><span class="muted">Listing state</span><strong id="listingState">Checking…</strong></div><div class="row"><span class="muted">First confirmed trade</span><strong id="firstTradeTime">Not confirmed</strong></div></div><div><div class="row"><span class="muted">Last monitor check</span><strong id="monitorTime">—</strong></div><div class="row"><span class="muted">Monitoring cadence</span><strong>5-second quote checks + trade stream</strong></div></div></div><div class="note" id="monitorNote">A quote or pre-opening indication does not prove that trading has started. The monitor only marks trading live after receiving a valid trade event from the provider's trade stream.</div></section>
@@ -70,6 +84,57 @@
 (()=> {
 const FX=149.21,$=id=>document.getElementById(id),money=n=>Number.isFinite(n)?'Rs '+Math.round(n).toLocaleString('en-IN'):'—',usd=n=>Number.isFinite(n)?'$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—',num=n=>Number.isFinite(n)?Math.round(n).toLocaleString('en-US'):'—',v=id=>Number($(id).value)||0;
 let ws=null,pollTimer=null,busy=false,quote=null,config={symbol:'ANT',pollSeconds:5},chart=null,reconnectTimer=null;
+const tape=[],forecastHistory=JSON.parse(localStorage.getItem('ant_flow_forecasts')||'[]');
+let lastTickPrice=null,lastTickDirection=0,lastForecastAt=0;
+function signed(n){return (n>=0?'+':'−')+usd(Math.abs(n));}
+function flowForecast(){
+ const now=Date.now(),windowTicks=tape.filter(t=>now-t.t<=60000);
+ const total=windowTicks.reduce((a,t)=>a+t.s,0),signedVol=windowTicks.reduce((a,t)=>a+t.s*t.dir,0);
+ const buy=total?windowTicks.reduce((a,t)=>a+(t.dir>0?t.s:t.dir===0?t.s*.5:0),0)/total:0;
+ const sell=total?windowTicks.reduce((a,t)=>a+(t.dir<0?t.s:t.dir===0?t.s*.5:0),0)/total:0;
+ const first=windowTicks[0],last=windowTicks[windowTicks.length-1],move=first&&last?(last.p/first.p-1)*100:0;
+ $('buyPressure').textContent=windowTicks.length? (buy*100).toFixed(1)+'%':'—';
+ $('sellPressure').textContent=windowTicks.length? (sell*100).toFixed(1)+'%':'—';
+ $('flowTrades').textContent=windowTicks.length.toLocaleString();
+ $('flowMove').textContent=windowTicks.length?signed(move)+'%':'—';
+ $('flowMove').className='v '+(move>=0?'green':'red');
+ $('netPressure').textContent=windowTicks.length?signed((buy-sell)*100)+' percentage points':'—';
+ $('flowUpdated').textContent=windowTicks.length?'Updated '+new Date(now).toLocaleTimeString():'Waiting for trade data';
+ if(windowTicks.length<10||total<=0){$('flowForecast').textContent='Insufficient live trades';$('flowConfidence').textContent='Need at least 10 prints in the last 60 seconds.';return;}
+ const imbalance=(buy-sell),momentum=Math.max(-1,Math.min(1,move/0.35));
+ const score=imbalance*.7+momentum*.3;
+ const direction=score>.12?'UP':score<-.12?'DOWN':'NEUTRAL';
+ const confidence=Math.min(85,Math.round(50+Math.abs(score)*45));
+ $('flowForecast').textContent=direction+' · '+(score>0?'+':'')+(score*100).toFixed(1)+' score';
+ $('flowConfidence').textContent='Heuristic confidence '+confidence+'% · not a statistical probability';
+ const latest=last.p;
+ $('forecastReference').textContent=usd(latest);
+ if(now-lastForecastAt>=60000){
+   const pred={at:now,price:latest,direction,score};
+   forecastHistory.push(pred);lastForecastAt=now;
+   while(forecastHistory.length>120)forecastHistory.shift();
+   localStorage.setItem('ant_flow_forecasts',JSON.stringify(forecastHistory));
+ }
+ const due=forecastHistory.filter(p=>!p.actual&&now-p.at>=300000);
+ for(const p of due){p.actual=latest;p.actualDirection=latest>p.price*1.0005?'UP':latest<p.price*.9995?'DOWN':'NEUTRAL';p.correct=p.direction===p.actualDirection;p.settledAt=now;}
+ if(due.length)localStorage.setItem('ant_flow_forecasts',JSON.stringify(forecastHistory));
+ const settled=forecastHistory.filter(p=>p.actual);
+ if(settled.length){
+  const latestSettled=settled[settled.length-1],accuracy=settled.filter(p=>p.correct).length/settled.length*100;
+  $('flowAccuracy').textContent=(latestSettled.correct?'CORRECT':'INCORRECT')+' · '+accuracy.toFixed(0)+'% historical hit rate';
+  $('flowAccuracy').className='result '+(latestSettled.correct?'green':'red');
+  $('flowAccuracyDetail').textContent='Latest: '+latestSettled.direction+' vs actual '+latestSettled.actualDirection+' ('+usd(latestSettled.price)+' → '+usd(latestSettled.actual)+'). '+settled.length+' settled forecasts.';
+ }
+}
+function recordFlowTick(t){
+ const p=Number(t.p),ts=Number(t.t)||Date.now(),size=Math.max(0,Number(t.v)||0);
+ if(!Number.isFinite(p)||p<=0)return;
+ let dir=0;if(lastTickPrice!==null){if(p>lastTickPrice)dir=1;else if(p<lastTickPrice)dir=-1;else dir=lastTickDirection;}
+ lastTickPrice=p;if(dir)lastTickDirection=dir;
+ tape.push({p,t:ts,s:size||1,dir});
+ const cutoff=Date.now()-360000;tape.splice(0,tape.findIndex(x=>x.t>=cutoff)===-1?tape.length:tape.findIndex(x=>x.t>=cutoff));
+ flowForecast();
+}
 function state(t,k=''){ $('status').textContent=t;$('dot').className='dot '+k; }
 function h(){return {shares:Math.max(0,v('shares')),basis:Math.max(0,v('basis')),buy:Math.max(0,v('buyQty')),price:Math.max(0,v('buyPrice'))};}
 function persist(){const x=h();localStorage.setItem('ant_portfolio',JSON.stringify({shares:x.shares,basis:x.basis}));}
@@ -95,7 +160,7 @@ async function api(path,opts={}){let r;try{r=await fetch(path,{cache:'no-store',
 async function status(){try{const d=await api('/api/status');$('listingState').textContent=d.tradingLive?'TRADING LIVE':d.streamConnected?'Awaiting first trade':'Feed disconnected';$('firstTradeTime').textContent=d.firstTrade?new Date(d.firstTrade.timestamp).toLocaleString()+' · '+usd(d.firstTrade.price):'Not confirmed';$('monitorTime').textContent=d.lastCheck?new Date(d.lastCheck).toLocaleTimeString():'—';$('monitorNote').textContent=d.tradingLive?'First trade confirmed by provider trade stream. This confirms trading began, not that your broker order has executed.':'A quote or pre-opening indication does not prove trading has started. Only a valid trade event marks this status as live.';}catch(e){$('listingState').textContent='Monitor unavailable';}}
 async function snapshot(){if(busy)return;busy=true;try{const d=await api('/api/quote?symbol='+encodeURIComponent(config.symbol));render(d.quote||d,'Server-proxied Finnhub snapshot · '+config.symbol);}catch(err){$('quoteTime').textContent=err.message;}finally{busy=false;}}
 function closeWs(){if(ws){try{ws.close();}catch{}ws=null;}}
-function connect(){closeWs();state('Connecting secure trade stream…','warn');const scheme=location.protocol==='https:'?'wss:':'ws:';try{ws=new WebSocket(scheme+'//'+location.host+'/ws?symbol='+encodeURIComponent(config.symbol));ws.onopen=()=>state('Dashboard connected · checking market feed','warn');ws.onmessage=ev=>{try{const m=JSON.parse(ev.data);if(m.type==='connection'){state(m.connected?'Finnhub trade stream connected · awaiting trades':'Finnhub trade stream unavailable','warn');}else if(m.type==='trade'&&Array.isArray(m.data))m.data.forEach(t=>{addTick(t);const p=Number(t.p),ts=Number(t.t)||Date.now();if(!Number.isFinite(p)||p<=0)return;if(!quote)quote={c:p,pc:NaN,o:NaN,h:p,l:p,v:Number(t.v)||0,t:Math.floor(ts/1000)};else quote={...quote,c:p,t:Math.floor(ts/1000),v:Number(quote.v||0)+Number(t.v||0),h:Math.max(Number(quote.h)||p,p),l:Math.min(Number(quote.l)||p,p)};render(quote,'Live Finnhub trade tick · '+config.symbol);state('Live trades streaming','live');status();});else if(m.type==='first_trade'){status();}else if(m.type==='error'){$('quoteSource').textContent=m.message||'Provider stream error';state('Trade stream error','warn');}}catch(e){console.warn(e);}};ws.onerror=()=>state('Trade stream error · check server/provider permissions','warn');ws.onclose=()=>{ws=null;state('Trade stream disconnected · reconnecting','warn');if(!reconnectTimer)reconnectTimer=setTimeout(()=>{reconnectTimer=null;connect();},5000);};}catch{state('WebSocket unavailable · polling continues','warn');}snapshot();}
+function connect(){closeWs();state('Connecting secure trade stream…','warn');const scheme=location.protocol==='https:'?'wss:':'ws:';try{ws=new WebSocket(scheme+'//'+location.host+'/ws?symbol='+encodeURIComponent(config.symbol));ws.onopen=()=>state('Dashboard connected · checking market feed','warn');ws.onmessage=ev=>{try{const m=JSON.parse(ev.data);if(m.type==='connection'){state(m.connected?'Finnhub trade stream connected · awaiting trades':'Finnhub trade stream unavailable','warn');}else if(m.type==='trade'&&Array.isArray(m.data))m.data.forEach(t=>{addTick(t);recordFlowTick(t);const p=Number(t.p),ts=Number(t.t)||Date.now();if(!Number.isFinite(p)||p<=0)return;if(!quote)quote={c:p,pc:NaN,o:NaN,h:p,l:p,v:Number(t.v)||0,t:Math.floor(ts/1000)};else quote={...quote,c:p,t:Math.floor(ts/1000),v:Number(quote.v||0)+Number(t.v||0),h:Math.max(Number(quote.h)||p,p),l:Math.min(Number(quote.l)||p,p)};render(quote,'Live Finnhub trade tick · '+config.symbol);state('Live trades streaming','live');status();});else if(m.type==='first_trade'){status();}else if(m.type==='error'){$('quoteSource').textContent=m.message||'Provider stream error';state('Trade stream error','warn');}}catch(e){console.warn(e);}};ws.onerror=()=>state('Trade stream error · check server/provider permissions','warn');ws.onclose=()=>{ws=null;state('Trade stream disconnected · reconnecting','warn');if(!reconnectTimer)reconnectTimer=setTimeout(()=>{reconnectTimer=null;connect();},5000);};}catch{state('WebSocket unavailable · polling continues','warn');}snapshot();}
 async function initialise(){try{const d=await api('/api/config');config={...config,...d};$('configuredSymbol').textContent=config.symbol;$('symbolLabel').textContent=config.symbol;$('refreshRate').textContent=(Number(config.pollSeconds)||5)+' seconds';$('credentialStatus').textContent=config.providerConfigured?'Configured on server':'Missing FINNHUB_API_KEY';if(!config.providerConfigured){state('Add FINNHUB_API_KEY to server .env','warn');$('quoteTime').textContent='Market-data API key missing on server.';}connect();await status();if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(()=>{snapshot();status();},Math.max(3000,(Number(config.pollSeconds)||5)*1000));}catch(e){state('Backend unavailable','warn');$('quoteTime').textContent=e.message+' · Start Node.js server and check .env.';}}
 function addBuy(){const x=h();if(x.buy<=0||x.price<=0){alert('Enter both additional shares and a planned purchase price.');return;}const cost=x.shares*x.basis,n=x.shares+x.buy;$('shares').value=n;$('basis').value=((cost+x.buy*x.price)/n).toFixed(4);$('buyQty').value=0;$('buyPrice').value='';persist();calc();scenarios();}
 $('applyBuy').addEventListener('click',addBuy);$('resetBuy').addEventListener('click',()=>{$('buyQty').value=0;$('buyPrice').value='';calc();scenarios();sellingCalc();});$('resetPortfolio').addEventListener('click',()=>{if(!confirm('Reset the portfolio to 38 shares at $83.00 and clear the planned purchase?'))return;$('shares').value=38;$('basis').value=83;$('buyQty').value=0;$('buyPrice').value='';localStorage.setItem('ant_portfolio',JSON.stringify({shares:38,basis:83}));calc();scenarios();sellingCalc();});['shares','basis','buyQty','buyPrice'].forEach(id=>$(id).addEventListener('input',()=>{persist();if($('sellShares').value===''||Number($('sellShares').value)===38)$('sellShares').value=Number($('shares').value)||0;calc();scenarios();sellingCalc();}));['bear','base','bull'].forEach(id=>$(id).addEventListener('input',scenarios));['sellPrice','sellFees','sellShares'].forEach(id=>$(id).addEventListener('input',sellingCalc));$('useLivePrice').addEventListener('click',()=>{if(quote&&Number.isFinite(quote.c)){$('sellPrice').value=quote.c.toFixed(2);sellingCalc();}else{$('sellPrice').focus();}});
