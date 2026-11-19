@@ -10,6 +10,8 @@
 @media(max-width:440px){.formgrid{grid-template-columns:1fr 1fr}.price{font-size:43px}.card{padding:16px}.scenarios{grid-template-columns:1fr}}
 
 .currency-card{margin-top:15px}.currency-converter{max-width:760px}.currency-result{font-size:clamp(32px,5vw,46px);font-weight:650;letter-spacing:-.055em;margin:6px 0 2px}.currency-meta{font-size:12px;color:var(--muted);margin-bottom:18px}.currency-line{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,1fr);gap:12px;margin-top:12px}.currency-control{display:flex;align-items:center;min-width:0;background:#09111e;border:1px solid #3a4659;border-radius:9px;overflow:hidden}.currency-control input{width:42%;min-width:0;background:transparent;border:0;color:var(--text);padding:13px 14px;font:inherit;font-size:16px;outline:none}.currency-control select{width:58%;min-width:0;border:0;border-left:1px solid #2a3548;background:#111b2a;color:var(--text);padding:13px 10px;font:inherit;outline:none}.currency-swap{display:grid;place-items:center;width:40px;height:40px;border-radius:50%;padding:0;font-size:20px}.currency-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.currency-heading h2{margin:0;font-size:15px}@media(max-width:560px){.currency-line{grid-template-columns:1fr}.currency-control input{width:38%}.currency-control select{width:62%}}
+
+.chatbot-card{margin-top:15px}.chat-messages{display:flex;flex-direction:column;gap:10px;max-height:390px;overflow:auto;padding:4px 2px 12px}.chat-message{max-width:92%;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#0b1422;white-space:pre-wrap;overflow-wrap:anywhere}.chat-message.user{align-self:flex-end;background:#172942;border-color:#304969}.chat-message.bot{align-self:flex-start}.chat-input-row{display:flex;gap:9px;align-items:stretch;margin-top:12px}.chat-input-row textarea{flex:1;min-width:0;resize:vertical;min-height:48px;max-height:130px;background:#09111e;border:1px solid #2a3a54;color:var(--text);padding:12px;border-radius:9px;font:inherit}.chat-input-row textarea:focus{outline:none;border-color:var(--blue)}.chat-examples{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}.chat-example{font-size:11px;padding:7px 9px;background:#101d2e;border-color:#2a3a54;color:#b9c9df}.chat-disclaimer{font-size:11px;color:var(--muted);margin-top:9px}@media(max-width:560px){.chat-input-row{flex-direction:column}.chat-input-row button{align-self:flex-end}}
 </style></head>
 <body><main>
 <header class="top"><div class="brand"><div class="logo">A</div><div><div class="eyebrow">Personal investing · watch terminal</div><h1>Anthropic IPO tracker</h1></div></div><div class="status"><span class="dot" id="dot"></span><span id="status">Feed not connected</span></div></header>
@@ -18,6 +20,12 @@
 <article class="card"><div class="eyebrow">Portfolio unrealised P/L</div><div class="price green" id="pnlNpr" style="font-size:clamp(34px,5vw,48px);margin:14px 0 5px">—</div><div class="sub" id="pnlUsd">Waiting for a valid market price</div><div class="row" style="margin-top:12px"><span class="muted">Unrealised gain / loss (USD)</span><strong id="pnlUsdValue">—</strong></div><div class="row" style="margin-top:18px"><span class="muted">Return on invested cost</span><strong id="return">—</strong></div><div class="row"><span class="muted">USD → NPR</span><strong>Rs 149.21 (fixed)</strong></div><div class="row"><span class="muted">USD → EUR (reference)</span><strong id="eurRate">Loading…</strong></div><div class="row"><span class="muted">Portfolio P/L (EUR)</span><strong id="pnlEur">—</strong></div></article>
 </section>
 
+
+<section class="section card chatbot-card"><div class="head"><div><h2>Portfolio maths chatbot</h2><div class="sub">Ask in plain English · calculations stay in this browser</div></div><span style="font-size:10px;color:var(--green)">NO AI API</span></div>
+<div class="chat-messages" id="mathChatMessages" aria-live="polite"><div class="chat-message bot">Hi! I can calculate share sales, multiple limit orders, realised profit/loss, remaining shares, average cost and break-even prices. I use your dashboard holdings unless you specify different holdings in your question.</div></div>
+<div class="chat-input-row"><textarea id="mathChatInput" rows="2" placeholder="Example: I have 54.39 shares at avg 90.80. What if I sell 16 at 110 and 34 at 115?" aria-label="Ask a portfolio maths question"></textarea><button id="mathChatSend" type="button">Calculate</button></div>
+<div class="chat-examples"><button class="chat-example" type="button" data-query="I have 54.39 shares at an average price of 90.80. What if I sell 16 shares at 110 and 34 shares at 115?">Multiple limit sells</button><button class="chat-example" type="button" data-query="If I sell all my shares at 120, what is my profit?">Sell all at $120</button><button class="chat-example" type="button" data-query="What is my break-even price including $12 fees?">Break-even with fees</button></div>
+<div class="chat-disclaimer">This is a rule-based calculator, not an AI assistant or broker. It does not place orders. Fees and taxes are excluded unless you specify them. Check the interpreted quantities and prices before relying on a result.</div></section>
 <section class="section card currency-card"><div class="currency-converter"><div class="currency-heading"><h2>Currency converter</h2><button class="currency-swap" id="currencySwap" type="button" aria-label="Swap currencies" title="Swap currencies">↕</button></div><div class="currency-result" id="currencyResult">—</div><div class="currency-meta" id="currencyMeta">Loading reference exchange rates…</div><div class="currency-line"><div class="currency-control"><input id="currencyAmountFrom" type="number" min="0" step="any" value="1" aria-label="Amount to convert"><select id="currencyFrom" aria-label="From currency"></select></div><div class="currency-control"><input id="currencyAmountTo" type="number" min="0" step="any" value="" aria-label="Converted amount"><select id="currencyTo" aria-label="To currency"></select></div></div><div class="note">Reference exchange rates supplied by Frankfurter. Rates are cached for one hour and are not executable broker or card rates; your bank or Revolut may apply a different rate or fees.</div></div></section>
 <section class="metrics">
 <div class="metric"><div class="eyebrow">Market value</div><div class="v" id="marketNpr">—</div><div class="sub" id="marketUsd">—</div><div class="sub" id="marketEur">—</div></div>
@@ -174,5 +182,45 @@ async function initialise(){try{const d=await api('/api/config');config={...conf
 function addBuy(){const x=h();if(x.buy<=0||x.price<=0){alert('Enter both additional shares and a planned purchase price.');return;}const cost=x.shares*x.basis,n=x.shares+x.buy;$('shares').value=n;$('basis').value=((cost+x.buy*x.price)/n).toFixed(4);$('buyQty').value=0;$('buyPrice').value='';persist();calc();scenarios();}
 $('applyBuy').addEventListener('click',addBuy);$('resetBuy').addEventListener('click',()=>{$('buyQty').value=0;$('buyPrice').value='';calc();scenarios();sellingCalc();});$('resetPortfolio').addEventListener('click',()=>{if(!confirm('Reset the portfolio to 38 shares at $83.00 and clear the planned purchase?'))return;$('shares').value=38;$('basis').value=83;$('buyQty').value=0;$('buyPrice').value='';localStorage.setItem('ant_portfolio',JSON.stringify({shares:38,basis:83}));calc();scenarios();sellingCalc();});['shares','basis','buyQty','buyPrice'].forEach(id=>$(id).addEventListener('input',()=>{persist();if($('sellShares').value===''||Number($('sellShares').value)===38)$('sellShares').value=Number($('shares').value)||0;calc();scenarios();sellingCalc();}));['bear','base','bull'].forEach(id=>$(id).addEventListener('input',scenarios));['sellPrice','sellFees','sellShares'].forEach(id=>$(id).addEventListener('input',sellingCalc));$('useLivePrice').addEventListener('click',()=>{if(quote&&Number.isFinite(quote.c)){$('sellPrice').value=quote.c.toFixed(2);sellingCalc();}else{$('sellPrice').focus();}});
 try{const saved=JSON.parse(localStorage.getItem('ant_portfolio')||'null');if(saved){if(Number.isFinite(saved.shares))$('shares').value=saved.shares;if(Number.isFinite(saved.basis))$('basis').value=saved.basis;}}catch{}$('sellShares').value=Number($('shares').value)||0;calc();scenarios();sellingCalc();initialise();
+
+function mathChatAdd(text,role){const el=document.createElement('div');el.className='chat-message '+role;el.textContent=text;$('mathChatMessages').appendChild(el);$('mathChatMessages').scrollTop=$('mathChatMessages').scrollHeight;}
+function money2(n){return '$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function parseMathChat(raw){
+ const text=raw.toLowerCase().replace(/,/g,'').replace(/\$/g,'').replace(/€/g,'');
+ const num='(\\d+(?:\\.\\d+)?)';
+ let shares=NaN,avg=NaN;
+ const shareMatch=text.match(new RegExp(num+'\\s*(?:shares?|shs?)\\b'));
+ const avgMatch=text.match(new RegExp('(?:avg(?:erage)?(?:\\s+(?:cost|price))?|cost basis)\\s*(?:of|at|is|:)?\\s*'+num));
+ if(shareMatch)shares=Number(shareMatch[1]);
+ if(avgMatch)avg=Number(avgMatch[1]);
+ if(!Number.isFinite(shares))shares=Math.max(0,v('shares'));
+ if(!Number.isFinite(avg))avg=Math.max(0,v('basis'));
+ const feesMatch=text.match(new RegExp('(?:fees?|commission|charges?)\\s*(?:of|at|=|:)?\\s*'+num));
+ const fees=feesMatch?Number(feesMatch[1]):0;
+ const sells=[];
+ const sellRe=new RegExp('(?:sell|selling|limit\\s+sell|exit)\\s*(?:order\\s*)?(?:of\\s*)?'+num+'\\s*(?:shares?)?\\s*(?:at|@|for)\\s*'+num,'g');
+ let m;while((m=sellRe.exec(text))!==null)sells.push({qty:Number(m[1]),price:Number(m[2])});
+ if(sells.length){
+  const sold=sells.reduce((a,x)=>a+x.qty,0),proceeds=sells.reduce((a,x)=>a+x.qty*x.price,0),cost=sold*avg,net=proceeds-fees,profit=net-cost,remaining=shares-sold;
+  if(sells.some(x=>x.qty<=0||x.price<0))return 'Please use positive share quantities and non-negative prices.';
+  if(sold>shares+1e-8)return 'You entered '+sold+' shares to sell, but your stated holdings are '+shares+'. Please check the quantities.';
+  const lines=['Sale breakdown (USD)',''];
+  sells.forEach((x,i)=>lines.push('Order '+(i+1)+': '+x.qty+' shares × '+money2(x.price)+' = '+money2(x.qty*x.price)));
+  lines.push('','Total shares sold: '+sold.toLocaleString('en-US',{maximumFractionDigits:4}),'Total proceeds: '+money2(proceeds),'Allocated cost ('+sold+' × '+money2(avg)+'): '+money2(cost),'Fees entered: '+money2(fees),'NET REALISED PROFIT: '+(profit<0?'-':'')+money2(Math.abs(profit)),'Weighted average selling price: '+money2(proceeds/sold),'Remaining shares: '+remaining.toLocaleString('en-US',{maximumFractionDigits:4}),'Remaining cost basis: '+money2(Math.max(0,remaining)*avg),'Average cost of remaining shares: '+money2(avg),'');
+  lines.push('Assumes all shares have the same average cost. Profit is calculated using average cost, before taxes and any unentered fees.');
+  return lines.join('\n');
+ }
+ if(/break.?even/.test(text)){const totalCost=shares*avg+fees,be=shares?totalCost/shares:NaN;return 'Break-even estimate\nShares: '+shares+'\nAverage cost: '+money2(avg)+'\nFees: '+money2(fees)+'\nRequired average sale price: '+money2(be)+' per share.\nThis excludes taxes and other unentered costs.';}
+ const buyMatch=text.match(new RegExp('(?:buy|purchase)\\s*'+num+'\\s*(?:shares?)?\\s*(?:at|@|for)\\s*'+num));
+ if(buyMatch){const qty=Number(buyMatch[1]),price=Number(buyMatch[2]),newShares=shares+qty,newCost=shares*avg+qty*price;return 'Buy calculation\nExisting position: '+shares+' shares at '+money2(avg)+' = '+money2(shares*avg)+'\nPlanned buy: '+qty+' shares at '+money2(price)+' = '+money2(qty*price)+'\nTotal shares: '+newShares+'\nTotal invested cost: '+money2(newCost)+'\nNew average cost: '+money2(newCost/newShares)+'.\nCalculation only; no order is placed.';}
+ const simple=text.match(/^\s*(-?\d+(?:\.\d+)?)\s*([+*/-])\s*(-?\d+(?:\.\d+)?)\s*$/);
+ if(simple){const a=Number(simple[1]),b=Number(simple[3]),op=simple[2],result=op==='+'?a+b:op==='-'?a-b:op==='*'?a*b:a/b;return Number.isFinite(result)?a+' '+op+' '+b+' = '+result:'Cannot divide by zero.';}
+ return 'I could not identify a supported calculation. Try: “I have 54.39 shares at an average price of 90.80. Sell 16 at 110 and 34 at 115.” You can also ask for a buy-average or break-even calculation.';
+}
+function runMathChat(query){const q=query.trim();if(!q)return;mathChatAdd(q,'user');mathChatAdd(parseMathChat(q),'bot');}
+$('mathChatSend').addEventListener('click',()=>{runMathChat($('mathChatInput').value);$('mathChatInput').value='';});
+$('mathChatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('mathChatSend').click();}});
+document.querySelectorAll('.chat-example').forEach(b=>b.addEventListener('click',()=>runMathChat(b.dataset.query)));
+
 })();
 </script></body></html>
