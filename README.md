@@ -52,3 +52,7 @@ Default editable position: 38 shares at USD 83.00/share. Fixed FX: NPR 149.21/US
 
 ## Data limitations
 A five-second quote refresh means the dashboard requests a new snapshot every five seconds; it does not guarantee that Finnhub's underlying quote changes that frequently or is exchange-real-time. The chart updates on trade events but depends on Finnhub entitlements, symbol coverage and delivery latency. Neither this app nor a WebSocket guarantees millisecond exchange latency or a complete consolidated tape.
+
+
+## EUR conversion
+The dashboard also displays portfolio market value, invested cost, unrealised P/L and selling-calculator P/L in EUR. The server fetches the USD/EUR reference rate from Frankfurter's v2 API (no API key required) and caches it for one hour. The UI displays the reference-rate date. This is a central-bank/reference rate, not a live executable FX quote; Revolut's actual conversion rate and fees may differ. The existing USD/NPR conversion remains fixed at NPR 149.21 per USD.
