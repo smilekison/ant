@@ -200,6 +200,8 @@ function parseMathChat(raw){
  const sells=[];
  const sellRe=new RegExp('(?:sell|selling|limit\\s+sell|exit)\\s*(?:order\\s*)?(?:of\\s*)?'+num+'\\s*(?:shares?)?\\s*(?:at|@|for)\\s*'+num,'g');
  let m;while((m=sellRe.exec(text))!==null)sells.push({qty:Number(m[1]),price:Number(m[2])});
+ if(sells.length){const followRe=new RegExp('and\\s*'+num+'\\s*(?:shares?)?\\s*(?:at|@|for)\\s*'+num,'g');while((m=followRe.exec(text))!==null)sells.push({qty:Number(m[1]),price:Number(m[2])});}
+ if(!sells.length&&/sell\\s+all/.test(text)){const allPrice=text.match(new RegExp('sell\\s+all(?:\\s+(?:my|the))?(?:\\s+shares?)?\\s*(?:at|@|for)\\s*'+num));if(allPrice)sells.push({qty:shares,price:Number(allPrice[1])});}
  if(sells.length){
   const sold=sells.reduce((a,x)=>a+x.qty,0),proceeds=sells.reduce((a,x)=>a+x.qty*x.price,0),cost=sold*avg,net=proceeds-fees,profit=net-cost,remaining=shares-sold;
   if(sells.some(x=>x.qty<=0||x.price<0))return 'Please use positive share quantities and non-negative prices.';
