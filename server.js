@@ -1,55 +1,162 @@
 require('dotenv').config();
-const express=require('express'),http=require('http'),path=require('path'),fs=require('fs'),WebSocket=require('ws');
-const app=express(),server=http.createServer(app),wss=new WebSocket.Server({noServer:true});
-const PORT=Number(process.env.PORT||3000),API_KEY=(process.env.FINNHUB_API_KEY||'').trim(),DEFAULT_SYMBOL=(process.env.STOCK_SYMBOL||'ANT').trim().toUpperCase(),FX_RATE=149.21;
-const DATA_DIR=path.resolve(process.env.DATA_DIR||path.join(__dirname,'data')),ALERT_FILE=path.join(DATA_DIR,'alerts.json'),STATE_FILE=path.join(DATA_DIR,'market-state.json');
-const validSymbol=/^[A-Z0-9.-]{1,15}$/;const requests=new Map(),clients=new Set();
-let providerSocket=null,streamConnected=false,reconnectTimer=null,monitorTimer=null,lastCheck=null,firstTrade=null,lastPrice=null,alerts=[];
-try{fs.mkdirSync(DATA_DIR,{recursive:true});alerts=JSON.parse(fs.readFileSync(ALERT_FILE,'utf8'));}catch{alerts=[];}
-try{const s=JSON.parse(fs.readFileSync(STATE_FILE,'utf8'));firstTrade=s.firstTrade||null;lastPrice=s.lastPrice||null;}catch{}
-app.disable('x-powered-by');app.use(express.json({limit:'20kb'}));app.use((req,res,next)=>{res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');res.setHeader('X-Frame-Options','SAMEORIGIN');next();});app.use(express.static(path.join(__dirname),{extensions:['html'],etag:true,maxAge:'1h'}));
-function symbolOf(input){const s=String(input||DEFAULT_SYMBOL).trim().toUpperCase();if(!validSymbol.test(s))throw Error('Invalid stock symbol.');return s;}
-function atomicJsonWrite(file,value){
-  const temp=file+'.tmp';
-  fs.writeFileSync(temp,JSON.stringify(value,null,2),{mode:0o600});
-  fs.renameSync(temp,file);
-}
-function saveAlerts(){atomicJsonWrite(ALERT_FILE,alerts);}
-function saveState(){atomicJsonWrite(STATE_FILE,{firstTrade,lastPrice});}
-function broadcast(data){const raw=JSON.stringify(data);for(const c of clients)if(c.readyState===WebSocket.OPEN)c.send(raw);}
-async function notifyUser(title,message){const token=process.env.TELEGRAM_BOT_TOKEN,chat=process.env.TELEGRAM_CHAT_ID;if(token&&chat){try{await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chat,text:'<b>'+title+'</b>\n'+message,parse_mode:'HTML',disable_web_page_preview:true}),signal:AbortSignal.timeout(8000)});}catch(e){console.error('Telegram alert failed:',e.message);}}}
-function fireAlert(a,price,source){a.triggered=true;a.triggeredAt=new Date().toISOString();a.lastTriggeredPrice=price;saveAlerts();const message=DEFAULT_SYMBOL+' '+(a.direction==='above'?'reached or crossed above ':'fell to or below ')+ '$'+price.toFixed(2)+' (target $'+a.price.toFixed(2)+') · '+source;broadcast({type:'price_alert',message,alertId:a.id});notifyUser('ANT price alert',message);if(a.mode==='once')a.enabled=false;saveAlerts();}
-function processPrice(price,source){if(!Number.isFinite(price)||price<=0)return;const previous=lastPrice;for(const a of alerts){if(!a.enabled)continue;const hit=a.direction==='above'?price>=a.price:price<=a.price;const crossed=previous===null||(a.direction==='above'?previous<a.price:previous>a.price);if(hit&&(a.mode==='repeat'?crossed:!a.triggered))fireAlert(a,price,source);}lastPrice=price;saveState();}
-async function getQuote(symbol=DEFAULT_SYMBOL){if(!API_KEY)throw Error('FINNHUB_API_KEY is not configured.');const u=new URL('https://finnhub.io/api/v1/quote');u.searchParams.set('symbol',symbol);u.searchParams.set('token',API_KEY);const r=await fetch(u,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(10000)}),d=await r.json();if(!r.ok)throw Error('Finnhub quote endpoint returned HTTP '+r.status);if(!Number.isFinite(Number(d.c))||Number(d.c)<=0)throw Error('Finnhub has not returned a valid traded quote for '+symbol);return d;}
-async function minuteCheck(){const now=new Date(),ny=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now).reduce((o,p)=>(o[p.type]=p.value,o),{}),date=ny.year+'-'+ny.month+'-'+ny.day,hour=Number(ny.hour),minute=Number(ny.minute);lastCheck=now.toISOString();if(date!=='2026-11-19'||hour<9||hour>16||(hour===9&&minute<30))return;if(!API_KEY)return;try{const q=await getQuote();if(Number(q.c)>0)processPrice(Number(q.c),'one-minute Finnhub quote snapshot');}catch(e){console.warn('Minute market check:',e.message);} }
-function handleTradeMessage(raw){let m;try{m=JSON.parse(raw.toString());}catch{return;}if(m.type!=='trade'||!Array.isArray(m.data))return;for(const t of m.data){const price=Number(t.p),timestamp=Number(t.t)||Date.now();if(!Number.isFinite(price)||price<=0)continue;if(!firstTrade){firstTrade={price,timestamp:new Date(timestamp).toISOString(),provider:'Finnhub trade WebSocket'};saveState();broadcast({type:'first_trade',price,timestamp:firstTrade.timestamp});notifyUser('ANT FIRST TRADE CONFIRMED','First confirmed provider trade: $'+price.toFixed(2)+' at '+new Date(timestamp).toLocaleString('en-US',{timeZone:'America/New_York'})+' ET. This confirms trading began, not that your broker order executed.');}processPrice(price,'Finnhub trade tick');}broadcast(m);}
-function connectProvider(){if(!API_KEY||providerSocket)return;console.log('Connecting persistent Finnhub trade stream for '+DEFAULT_SYMBOL);const ws=new WebSocket('wss://ws.finnhub.io?token='+encodeURIComponent(API_KEY));providerSocket=ws;const timeout=setTimeout(()=>{if(ws.readyState!==WebSocket.OPEN)ws.terminate();},12000);ws.on('open',()=>{clearTimeout(timeout);streamConnected=true;ws.send(JSON.stringify({type:'subscribe',symbol:DEFAULT_SYMBOL}));broadcast({type:'connection',connected:true});console.log('Finnhub trade stream connected');});ws.on('message',handleTradeMessage);ws.on('error',e=>console.error('Finnhub stream error:',e.message));ws.on('close',()=>{clearTimeout(timeout);streamConnected=false;providerSocket=null;broadcast({type:'connection',connected:false});if(!reconnectTimer)reconnectTimer=setTimeout(()=>{reconnectTimer=null;connectProvider();},5000);});}
-function rateLimit(req,res,next){const k=req.ip||req.socket.remoteAddress||'unknown',now=Date.now(),x=requests.get(k)||{start:now,count:0};if(now-x.start>60000){x.start=now;x.count=0;}if(++x.count>60)return res.status(429).json({error:'Too many quote requests. Try again shortly.'});requests.set(k,x);next();}
-app.get('/api/health',(_q,res)=>{
-  let storageWritable=true,storageError=null;
-  try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.health-check');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe);}catch(e){storageWritable=false;storageError=e.code||'storage_error';}
-  res.setHeader('Cache-Control','no-store');
-  res.json({ok:true,service:'anthropic-ipo-tracker',streamConnected,providerConfigured:Boolean(API_KEY),telegramConfigured:Boolean(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID),alertsCount:alerts.length,storageWritable,storageError,storageDirectory:DATA_DIR,now:new Date().toISOString()});
-});
-app.get('/api/config',(_q,res)=>res.json({symbol:DEFAULT_SYMBOL,pollSeconds:60,provider:'Finnhub',providerConfigured:Boolean(API_KEY),fxUsdNpr:FX_RATE,telegramConfigured:Boolean(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID)}));
-app.get('/api/status',(_q,res)=>res.json({tradingLive:Boolean(firstTrade),firstTrade,streamConnected,lastCheck,monitorDate:'2026-11-19',monitorIntervalSeconds:60,lastPrice}));
-app.get('/api/quote',rateLimit,async(req,res)=>{if(!API_KEY)return res.status(503).json({error:'FINNHUB_API_KEY missing in .env'});let symbol;try{symbol=symbolOf(req.query.symbol);}catch(e){return res.status(400).json({error:e.message});}try{const q=await getQuote(symbol);res.setHeader('Cache-Control','no-store');res.json({quote:q,symbol,source:'Finnhub'});}catch(e){res.status(502).json({error:e.message});}});
-app.get('/api/alerts',(_q,res)=>res.json({alerts}));
-app.post('/api/alerts',(req,res)=>{
-  try{
-    const price=Number(req.body.price),direction=req.body.direction,mode=req.body.mode;
-    if(!Number.isFinite(price)||price<=0)return res.status(400).json({error:'Enter a positive target price.'});
-    if(!['above','below'].includes(direction)||!['once','repeat'].includes(mode))return res.status(400).json({error:'Invalid alert settings.'});
-    const a={id:require('crypto').randomUUID(),price,direction,mode,enabled:true,triggered:false,createdAt:new Date().toISOString()};
-    alerts.push(a);saveAlerts();res.status(201).json({alerts});
-  }catch(e){console.error('Could not save price alert:',e);res.status(500).json({error:'The server could not save this alert. Check that the app data/ directory is writable.'});}
-});
-app.delete('/api/alerts/:id',(req,res)=>{
-  try{alerts=alerts.filter(a=>a.id!==req.params.id);saveAlerts();res.json({alerts});}
-  catch(e){console.error('Could not delete price alert:',e);res.status(500).json({error:'The server could not update saved alerts. Check that the app data/ directory is writable.'});}
-});
+const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 
-app.use((err,req,res,next)=>{console.error('Unhandled API error:',err);if(res.headersSent)return next(err);res.status(500).json({error:'Unexpected tracker backend error. Check the Node.js server logs.'});});
-server.on('upgrade',(req,socket,head)=>{let u;try{u=new URL(req.url,'http://localhost');}catch{socket.destroy();return;}if(u.pathname!=='/ws'){socket.destroy();return;}let symbol;try{symbol=symbolOf(u.searchParams.get('symbol'));}catch{socket.destroy();return;}if(symbol!==DEFAULT_SYMBOL){socket.destroy();return;}wss.handleUpgrade(req,socket,head,client=>{clients.add(client);client.on('close',()=>clients.delete(client));client.on('error',()=>clients.delete(client));client.send(JSON.stringify({type:'connection',connected:streamConnected}));if(firstTrade)client.send(JSON.stringify({type:'first_trade',price:firstTrade.price,timestamp:firstTrade.timestamp}));});});
-server.listen(PORT,()=>{console.log('ANT tracker listening on '+PORT);console.log('Persistent data directory: '+DATA_DIR);try{fs.mkdirSync(DATA_DIR,{recursive:true});fs.accessSync(DATA_DIR,fs.constants.W_OK);console.log('Persistent data directory is writable.');}catch(e){console.error('Persistent data directory is not writable:',e.code||e.message);}if(!API_KEY)console.warn('FINNHUB_API_KEY missing; market feed disabled.');connectProvider();minuteCheck();monitorTimer=setInterval(minuteCheck,60000);});
-process.on('SIGTERM',()=>{clearInterval(monitorTimer);if(providerSocket)providerSocket.close();server.close(()=>process.exit(0));});process.on('SIGINT',()=>{clearInterval(monitorTimer);if(providerSocket)providerSocket.close();server.close(()=>process.exit(0));});
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ noServer: true });
+const PORT = Number(process.env.PORT || 3000);
+const API_KEY = (process.env.FINNHUB_API_KEY || '').trim();
+const DEFAULT_SYMBOL = (process.env.STOCK_SYMBOL || 'ANT').trim().toUpperCase();
+const POLL_SECONDS = Math.max(3, Math.min(15, Number(process.env.QUOTE_REFRESH_SECONDS || 5)));
+const FX_RATE = 149.21;
+const validSymbol = /^[A-Z0-9.-]{1,15}$/;
+const requests = new Map();
+const clients = new Set();
+let providerSocket = null;
+let streamConnected = false;
+let reconnectTimer = null;
+let firstTrade = null;
+let lastPrice = null;
+let lastCheck = null;
+
+app.disable('x-powered-by');
+app.use(express.json({ limit: '10kb' }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  next();
+});
+app.use(express.static(__dirname, { extensions: ['html'], etag: true, maxAge: '1h' }));
+
+function symbolOf(input) {
+  const symbol = String(input || DEFAULT_SYMBOL).trim().toUpperCase();
+  if (!validSymbol.test(symbol)) throw Error('Invalid stock symbol.');
+  return symbol;
+}
+function broadcast(message) {
+  const raw = JSON.stringify(message);
+  for (const client of clients) if (client.readyState === WebSocket.OPEN) client.send(raw);
+}
+async function getQuote(symbol = DEFAULT_SYMBOL) {
+  if (!API_KEY) throw Error('FINNHUB_API_KEY is not configured in the server .env file.');
+  const url = new URL('https://finnhub.io/api/v1/quote');
+  url.searchParams.set('symbol', symbol);
+  url.searchParams.set('token', API_KEY);
+  const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+  const data = await response.json();
+  if (!response.ok) throw Error('Finnhub quote request failed with HTTP ' + response.status + '. Check API access and rate limits.');
+  if (!data || !Number.isFinite(Number(data.c)) || Number(data.c) <= 0) throw Error('Finnhub has no valid quote for ' + symbol + '. Check symbol coverage and market-data permissions.');
+  return data;
+}
+function markTrade(trade) {
+  const price = Number(trade.p);
+  const timestamp = Number(trade.t) || Date.now();
+  if (!Number.isFinite(price) || price <= 0) return;
+  lastPrice = price;
+  if (!firstTrade) {
+    firstTrade = { price, timestamp: new Date(timestamp).toISOString(), provider: 'Finnhub trade WebSocket' };
+    broadcast({ type: 'first_trade', price, timestamp: firstTrade.timestamp });
+  }
+}
+function connectProvider() {
+  if (!API_KEY || providerSocket) return;
+  console.log('Connecting to Finnhub trade stream for ' + DEFAULT_SYMBOL);
+  const ws = new WebSocket('wss://ws.finnhub.io?token=' + encodeURIComponent(API_KEY));
+  providerSocket = ws;
+  const timeout = setTimeout(() => { if (ws.readyState !== WebSocket.OPEN) ws.terminate(); }, 12000);
+  ws.on('open', () => {
+    clearTimeout(timeout);
+    streamConnected = true;
+    ws.send(JSON.stringify({ type: 'subscribe', symbol: DEFAULT_SYMBOL }));
+    broadcast({ type: 'connection', connected: true });
+    console.log('Finnhub trade stream connected');
+  });
+  ws.on('message', raw => {
+    let message;
+    try { message = JSON.parse(raw.toString()); } catch { return; }
+    if (message.type === 'trade' && Array.isArray(message.data)) {
+      for (const trade of message.data) markTrade(trade);
+      broadcast(message);
+    }
+  });
+  ws.on('error', error => console.error('Finnhub WebSocket error:', error.message));
+  ws.on('close', () => {
+    clearTimeout(timeout);
+    streamConnected = false;
+    providerSocket = null;
+    broadcast({ type: 'connection', connected: false });
+    if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; connectProvider(); }, 5000);
+  });
+}
+function rateLimit(req, res, next) {
+  const key = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = requests.get(key) || { start: now, count: 0 };
+  if (now - entry.start > 60000) { entry.start = now; entry.count = 0; }
+  if (++entry.count > 30) return res.status(429).json({ error: 'Too many requests. Reduce refresh frequency.' });
+  requests.set(key, entry);
+  next();
+}
+app.get('/api/health', (_req, res) => res.json({
+  ok: true,
+  service: 'anthropic-ipo-tracker',
+  streamConnected,
+  providerConfigured: Boolean(API_KEY),
+  refreshSeconds: POLL_SECONDS,
+  now: new Date().toISOString()
+}));
+app.get('/api/config', (_req, res) => res.json({
+  symbol: DEFAULT_SYMBOL,
+  pollSeconds: POLL_SECONDS,
+  provider: 'Finnhub',
+  providerConfigured: Boolean(API_KEY),
+  fxUsdNpr: FX_RATE
+}));
+app.get('/api/status', (_req, res) => res.json({
+  tradingLive: Boolean(firstTrade),
+  firstTrade,
+  streamConnected,
+  lastCheck,
+  monitorIntervalSeconds: POLL_SECONDS,
+  lastPrice
+}));
+app.get('/api/quote', rateLimit, async (req, res) => {
+  if (!API_KEY) return res.status(503).json({ error: 'FINNHUB_API_KEY is missing in .env.' });
+  let symbol;
+  try { symbol = symbolOf(req.query.symbol); } catch (error) { return res.status(400).json({ error: error.message }); }
+  try {
+    const quote = await getQuote(symbol);
+    lastCheck = new Date().toISOString();
+    if (!lastPrice && Number(quote.c) > 0) lastPrice = Number(quote.c);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ quote, symbol, source: 'Finnhub', checkedAt: lastCheck });
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
+server.on('upgrade', (req, socket, head) => {
+  let url;
+  try { url = new URL(req.url, 'http://localhost'); } catch { socket.destroy(); return; }
+  if (url.pathname !== '/ws') { socket.destroy(); return; }
+  let symbol;
+  try { symbol = symbolOf(url.searchParams.get('symbol')); } catch { socket.destroy(); return; }
+  if (symbol !== DEFAULT_SYMBOL) { socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, client => {
+    clients.add(client);
+    client.on('close', () => clients.delete(client));
+    client.on('error', () => clients.delete(client));
+    client.send(JSON.stringify({ type: 'connection', connected: streamConnected }));
+    if (firstTrade) client.send(JSON.stringify({ type: 'first_trade', price: firstTrade.price, timestamp: firstTrade.timestamp }));
+  });
+});
+server.listen(PORT, () => {
+  console.log('ANT tracker listening on port ' + PORT);
+  console.log('Automatic quote refresh: ' + POLL_SECONDS + ' seconds');
+  if (!API_KEY) console.warn('FINNHUB_API_KEY missing; market feed disabled.');
+  connectProvider();
+});
+process.on('SIGTERM', () => { if (providerSocket) providerSocket.close(); server.close(() => process.exit(0)); });
+process.on('SIGINT', () => { if (providerSocket) providerSocket.close(); server.close(() => process.exit(0)); });
