@@ -20,7 +20,8 @@ let reconnectTimer = null;
 let firstTrade = null;
 let lastPrice = null;
 let lastCheck = null;
-let fxCache={rate:null,date:null,fetchedAt:0};
+const fxCache = new Map();
+let currenciesCache = { data: null, fetchedAt: 0 };
 
 
 app.disable('x-powered-by');
@@ -117,21 +118,46 @@ app.get('/api/config', (_req, res) => res.json({
   providerConfigured: Boolean(API_KEY),
   fxUsdNpr: FX_RATE
 }));
-app.get('/api/fx', async (_req, res) => {
+app.get('/api/currencies', async (_req, res) => {
   try {
-    if (!fxCache.rate || Date.now() - fxCache.fetchedAt > 3600000) {
-      const response = await fetch('https://api.frankfurter.dev/v2/rate/usd/eur', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(7000) });
+    if (!currenciesCache.data || Date.now() - currenciesCache.fetchedAt > 86400000) {
+      const response = await fetch('https://api.frankfurter.dev/v2/currencies', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+      if (!response.ok) throw Error('Currency provider returned HTTP ' + response.status);
+      const data = await response.json();
+      if (!Array.isArray(data)) throw Error('Invalid currency list');
+      currenciesCache = { data: data.map(c => ({ code: c.iso_code, name: c.name })).filter(c => c.code && c.name).sort((a,b) => a.code.localeCompare(b.code)), fetchedAt: Date.now() };
+    }
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.json({ currencies: currenciesCache.data, source: 'Frankfurter' });
+  } catch (error) {
+    console.error('Currency list unavailable:', error.message);
+    res.status(502).json({ error: 'Currency list unavailable.' });
+  }
+});
+app.get('/api/fx', async (req, res) => {
+  try {
+    const base = String(req.query.base || 'USD').trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(base)) return res.status(400).json({ error: 'Invalid base currency.' });
+    let cached = fxCache.get(base);
+    if (!cached || Date.now() - cached.fetchedAt > 3600000) {
+      const url = new URL('https://api.frankfurter.dev/v2/rates');
+      url.searchParams.set('base', base);
+      const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
       if (!response.ok) throw Error('FX provider returned HTTP ' + response.status);
       const data = await response.json();
-      if (!Number.isFinite(Number(data.rate)) || Number(data.rate) <= 0) throw Error('Invalid USD/EUR reference rate');
-      fxCache = { rate: Number(data.rate), date: data.date, fetchedAt: Date.now() };
+      if (!Array.isArray(data)) throw Error('Invalid FX rates response');
+      const rates = Object.fromEntries(data.map(item => [item.currency, Number(item.rate)]));
+      if (!Object.keys(rates).length) throw Error('No reference rates available for ' + base);
+      cached = { base, date: data[0].date, rates, fetchedAt: Date.now() };
+      fxCache.set(base, cached);
     }
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.json({ base: 'USD', quote: 'EUR', usdEur: fxCache.rate, date: fxCache.date, source: 'Frankfurter reference rates', fetchedAt: new Date(fxCache.fetchedAt).toISOString() });
+    res.json({ base, date: cached.date, rates: cached.rates, usdEur: base === 'USD' ? cached.rates.EUR : undefined, source: 'Frankfurter reference rates', fetchedAt: new Date(cached.fetchedAt).toISOString() });
   } catch (error) {
-    console.error('FX reference rate unavailable:', error.message);
-    if (fxCache.rate) return res.json({ base: 'USD', quote: 'EUR', usdEur: fxCache.rate, date: fxCache.date, source: 'Frankfurter cached reference rate', stale: true });
-    res.status(502).json({ error: 'USD/EUR reference rate unavailable.' });
+    console.error('FX reference rates unavailable:', error.message);
+    const cached = fxCache.get(String(req.query.base || 'USD').trim().toUpperCase());
+    if (cached) return res.json({ base: cached.base, date: cached.date, rates: cached.rates, usdEur: cached.rates.EUR, source: 'Frankfurter cached reference rates', stale: true });
+    res.status(502).json({ error: 'Reference exchange rates unavailable.' });
   }
 });
 app.get('/api/status', (_req, res) => res.json({
