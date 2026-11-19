@@ -258,5 +258,37 @@ $('mathChatSend').addEventListener('click',()=>{runMathChat($('mathChatInput').v
 $('mathChatInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('mathChatSend').click();}});
 document.querySelectorAll('.chat-example').forEach(b=>b.addEventListener('click',()=>runMathChat(b.dataset.query)));
 
+
+async function refreshPaperTrading(){
+ try{
+  const d=await api('/api/trading/state');
+  $('paperCash').textContent=money2(d.cash);$('paperEquity').textContent=money2(d.equity);
+  $('paperRealised').textContent=(d.realisedToday<0?'-':'+')+money2(Math.abs(d.realisedToday));
+  $('paperRisk').textContent=d.killSwitch?'KILL SWITCH ON':(d.realisedToday<=-d.dailyLossLimit?'DAILY LOSS LIMIT':'Protected');
+  $('paperRisk').className='v '+(d.killSwitch||d.realisedToday<=-d.dailyLossLimit?'red':'green');
+  $('paperMarketPrice').textContent=quote?'Latest '+usd(quote.c):'Market price unavailable';
+  $('paperBotStatus').textContent=d.bot.running?'ARMED':'STOPPED';
+  $('paperBotMessage').textContent=d.bot.lastAction?(d.bot.lastAction.status+' · '+(d.bot.lastAction.reason||('Triggered at '+usd(d.bot.lastAction.price)))):'One-shot bot waits for its configured trigger.';
+  $('paperKillSwitch').textContent=d.killSwitch?'Disable kill switch':'Enable kill switch';
+  $('paperKillSwitch').classList.toggle('paper-danger',!d.killSwitch);
+  const pos=$('paperPositions');pos.replaceChildren();
+  if(!d.positions.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=5;td.className='muted';td.textContent='No paper positions yet.';tr.appendChild(td);pos.appendChild(tr);}
+  d.positions.forEach(p=>{const tr=document.createElement('tr');[p.symbol,p.quantity,money2(p.averageCost),p.marketValue==null?'—':money2(p.marketValue),p.unrealisedPnl==null?'—':money2(p.unrealisedPnl)].forEach((v,i)=>{const td=document.createElement('td');td.textContent=String(v);if(i===4)td.className=Number(p.unrealisedPnl)>=0?'green':'red';tr.appendChild(td);});pos.appendChild(tr);});
+  const orders=$('paperOrders');orders.replaceChildren();
+  if(!d.orders.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=7;td.className='muted';td.textContent='No paper orders yet.';tr.appendChild(td);orders.appendChild(tr);}
+  d.orders.forEach(o=>{const tr=document.createElement('tr');[new Date(o.createdAt).toLocaleString(),o.side,o.type,o.quantity,o.averageFillPrice?money2(o.averageFillPrice):(o.limitPrice?money2(o.limitPrice):'—'),o.status].forEach(v=>{const td=document.createElement('td');td.textContent=String(v);tr.appendChild(td);});const action=document.createElement('td');if(o.status==='PENDING'){const b=document.createElement('button');b.textContent='Cancel';b.addEventListener('click',async()=>{try{await api('/api/trading/orders/'+encodeURIComponent(o.id)+'/cancel',{method:'POST',body:'{}'});await refreshPaperTrading();}catch(e){alert(e.message);}});action.appendChild(b);}else action.textContent='—';tr.appendChild(action);orders.appendChild(tr);});
+ }catch(e){$('paperPreviewResult').textContent='Paper trading service unavailable: '+e.message;}
+}
+let paperPreviewDraft=null;
+$('paperType').addEventListener('change',()=>{$('paperLimitField').style.display=$('paperType').value==='LIMIT'?'block':'none';$('paperSubmit').disabled=true;paperPreviewDraft=null;});
+$('paperPreview').addEventListener('click',async()=>{try{const draft={side:$('paperSide').value,type:$('paperType').value,quantity:Number($('paperQty').value),limitPrice:$('paperType').value==='LIMIT'?Number($('paperLimit').value):null};const d=await api('/api/trading/orders/preview',{method:'POST',body:JSON.stringify(draft)});paperPreviewDraft=draft;$('paperSubmit').disabled=false;$('paperPreviewResult').textContent=d.preview.side+' '+d.preview.quantity+' '+d.preview.symbol+' · '+d.preview.type+' · reference '+money2(d.preview.referencePrice)+' · estimated notional '+money2(d.preview.estimatedNotional)+'. '+d.preview.warning;}catch(e){paperPreviewDraft=null;$('paperSubmit').disabled=true;$('paperPreviewResult').textContent=e.message;}});
+$('paperSubmit').addEventListener('click',async()=>{if(!paperPreviewDraft)return;if(!confirm('Submit this simulated PAPER order? No real broker order will be sent.'))return;try{const d=await api('/api/trading/orders',{method:'POST',body:JSON.stringify(paperPreviewDraft)});paperPreviewDraft=null;$('paperSubmit').disabled=true;$('paperPreviewResult').textContent='Paper order '+d.order.id+' · '+d.order.status;await refreshPaperTrading();}catch(e){$('paperPreviewResult').textContent=e.message;}});
+$('paperRefresh').addEventListener('click',refreshPaperTrading);
+$('paperBotStart').addEventListener('click',async()=>{try{const body={action:'START',side:$('paperBotSide').value,condition:$('paperBotCondition').value,quantity:Number($('paperBotQty').value),triggerPrice:Number($('paperBotPrice').value)};await api('/api/trading/bot',{method:'POST',body:JSON.stringify(body)});await refreshPaperTrading();}catch(e){alert(e.message);}});
+$('paperBotStop').addEventListener('click',async()=>{try{await api('/api/trading/bot',{method:'POST',body:JSON.stringify({action:'STOP'})});await refreshPaperTrading();}catch(e){alert(e.message);}});
+$('paperKillSwitch').addEventListener('click',async()=>{try{const active=$('paperKillSwitch').textContent.includes('Disable');await api('/api/trading/kill-switch',{method:'POST',body:JSON.stringify({active})});await refreshPaperTrading();}catch(e){alert(e.message);}});
+$('paperReset').addEventListener('click',async()=>{if(prompt('Type RESET PAPER ACCOUNT to erase simulated cash, positions and orders:')!=='RESET PAPER ACCOUNT')return;try{await api('/api/trading/reset',{method:'POST',body:JSON.stringify({confirm:'RESET PAPER ACCOUNT'})});await refreshPaperTrading();}catch(e){alert(e.message);}});
+refreshPaperTrading();setInterval(refreshPaperTrading,10000);
+
 })();
 </script></body></html>
