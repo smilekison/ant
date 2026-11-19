@@ -2,7 +2,7 @@ require('dotenv').config();
 const express=require('express'),http=require('http'),path=require('path'),fs=require('fs'),WebSocket=require('ws');
 const app=express(),server=http.createServer(app),wss=new WebSocket.Server({noServer:true});
 const PORT=Number(process.env.PORT||3000),API_KEY=(process.env.FINNHUB_API_KEY||'').trim(),DEFAULT_SYMBOL=(process.env.STOCK_SYMBOL||'ANT').trim().toUpperCase(),FX_RATE=149.21;
-const DATA_DIR=path.join(__dirname,'data'),ALERT_FILE=path.join(DATA_DIR,'alerts.json'),STATE_FILE=path.join(DATA_DIR,'market-state.json');
+const DATA_DIR=path.resolve(process.env.DATA_DIR||path.join(__dirname,'data')),ALERT_FILE=path.join(DATA_DIR,'alerts.json'),STATE_FILE=path.join(DATA_DIR,'market-state.json');
 const validSymbol=/^[A-Z0-9.-]{1,15}$/;const requests=new Map(),clients=new Set();
 let providerSocket=null,streamConnected=false,reconnectTimer=null,monitorTimer=null,lastCheck=null,firstTrade=null,lastPrice=null,alerts=[];
 try{fs.mkdirSync(DATA_DIR,{recursive:true});alerts=JSON.parse(fs.readFileSync(ALERT_FILE,'utf8'));}catch{alerts=[];}
@@ -29,7 +29,7 @@ app.get('/api/health',(_q,res)=>{
   let storageWritable=true,storageError=null;
   try{fs.mkdirSync(DATA_DIR,{recursive:true});const probe=path.join(DATA_DIR,'.health-check');fs.writeFileSync(probe,'ok');fs.unlinkSync(probe);}catch(e){storageWritable=false;storageError=e.code||'storage_error';}
   res.setHeader('Cache-Control','no-store');
-  res.json({ok:true,service:'anthropic-ipo-tracker',streamConnected,providerConfigured:Boolean(API_KEY),telegramConfigured:Boolean(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID),alertsCount:alerts.length,storageWritable,storageError,now:new Date().toISOString()});
+  res.json({ok:true,service:'anthropic-ipo-tracker',streamConnected,providerConfigured:Boolean(API_KEY),telegramConfigured:Boolean(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID),alertsCount:alerts.length,storageWritable,storageError,storageDirectory:DATA_DIR,now:new Date().toISOString()});
 });
 app.get('/api/config',(_q,res)=>res.json({symbol:DEFAULT_SYMBOL,pollSeconds:60,provider:'Finnhub',providerConfigured:Boolean(API_KEY),fxUsdNpr:FX_RATE,telegramConfigured:Boolean(process.env.TELEGRAM_BOT_TOKEN&&process.env.TELEGRAM_CHAT_ID)}));
 app.get('/api/status',(_q,res)=>res.json({tradingLive:Boolean(firstTrade),firstTrade,streamConnected,lastCheck,monitorDate:'2026-11-19',monitorIntervalSeconds:60,lastPrice}));
@@ -51,5 +51,5 @@ app.delete('/api/alerts/:id',(req,res)=>{
 
 app.use((err,req,res,next)=>{console.error('Unhandled API error:',err);if(res.headersSent)return next(err);res.status(500).json({error:'Unexpected tracker backend error. Check the Node.js server logs.'});});
 server.on('upgrade',(req,socket,head)=>{let u;try{u=new URL(req.url,'http://localhost');}catch{socket.destroy();return;}if(u.pathname!=='/ws'){socket.destroy();return;}let symbol;try{symbol=symbolOf(u.searchParams.get('symbol'));}catch{socket.destroy();return;}if(symbol!==DEFAULT_SYMBOL){socket.destroy();return;}wss.handleUpgrade(req,socket,head,client=>{clients.add(client);client.on('close',()=>clients.delete(client));client.on('error',()=>clients.delete(client));client.send(JSON.stringify({type:'connection',connected:streamConnected}));if(firstTrade)client.send(JSON.stringify({type:'first_trade',price:firstTrade.price,timestamp:firstTrade.timestamp}));});});
-server.listen(PORT,()=>{console.log('ANT tracker listening on '+PORT);if(!API_KEY)console.warn('FINNHUB_API_KEY missing; market feed disabled.');connectProvider();minuteCheck();monitorTimer=setInterval(minuteCheck,60000);});
+server.listen(PORT,()=>{console.log('ANT tracker listening on '+PORT);console.log('Persistent data directory: '+DATA_DIR);try{fs.mkdirSync(DATA_DIR,{recursive:true});fs.accessSync(DATA_DIR,fs.constants.W_OK);console.log('Persistent data directory is writable.');}catch(e){console.error('Persistent data directory is not writable:',e.code||e.message);}if(!API_KEY)console.warn('FINNHUB_API_KEY missing; market feed disabled.');connectProvider();minuteCheck();monitorTimer=setInterval(minuteCheck,60000);});
 process.on('SIGTERM',()=>{clearInterval(monitorTimer);if(providerSocket)providerSocket.close();server.close(()=>process.exit(0));});process.on('SIGINT',()=>{clearInterval(monitorTimer);if(providerSocket)providerSocket.close();server.close(()=>process.exit(0));});
