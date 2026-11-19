@@ -78,7 +78,7 @@ function createTradingRouter({ getQuote, symbol }) {
     if (!Number.isFinite(reference) || reference <= 0) throw Error('No valid market quote is available for this symbol.');
     const notional = reference * order.quantity;
     if (notional > limits.maxOrderNotional) throw Error('Order value exceeds the paper limit of $' + limits.maxOrderNotional.toLocaleString() + '.');
-    if (order.side === 'BUY' && order.type === 'MARKET' && notional > state.cash) throw Error('Insufficient paper cash for this market order.');
+    if (order.side === 'BUY' && notional > state.cash) throw Error('Insufficient paper cash for this market order.');
     if (order.side === 'SELL' && order.quantity > positionFor(order.symbol).quantity) throw Error('Insufficient paper shares for this sell order.');
     if (dailyPnl() <= -limits.dailyLossLimit) throw Error('Daily realised-loss limit reached. Trading is blocked until the next day.');
     if (state.killSwitch) throw Error('Kill switch is active. Disable it before submitting paper orders.');
