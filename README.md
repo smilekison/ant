@@ -23,11 +23,11 @@ TELEGRAM_CHAT_ID=
 The server reads the Finnhub key privately. Never commit .env. For hosted deployment, set these as private environment variables in the hosting provider.
 
 ## Telegram alerts setup (recommended)
-1. In Telegram, open **@BotFather**, send `/newbot`, follow the prompts and copy the bot token.
-2. Open your new bot's chat and press **Start** (or send `/start`).
-3. To obtain your chat ID, open `https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates` in a browser after sending the bot a message. Find `message.chat.id` in the JSON response.
-4. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the private `.env` file, then restart the app.
-5. Never share the token or commit it. Test with a price alert close to the current price, then remove it.
+1. Create a Finnhub account at https://finnhub.io/, open your dashboard, copy your API token, and confirm that your plan includes real-time US/Nasdaq trade WebSocket access and ANT symbol coverage. A key being present does not mean this permission is enabled.\n2. In Telegram, open **@BotFather**, send `/newbot`, follow the prompts and copy the bot token.
+3. Open your new bot's chat and press **Start** (or send `/start`).
+4. To obtain your chat ID, open `https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates` in a browser after sending the bot a message. Find `message.chat.id` in the JSON response.
+5. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in the private `.env` file, then restart the app.
+6. Never share the token or commit it. Test with a price alert close to the current price, then remove it.
 
 ## Today's monitoring
 The server keeps one Finnhub trade WebSocket connection open independently of the browser. The first valid ANT trade event is persisted in `data/market-state.json` and triggers a Telegram alert (if configured) and a browser event. A one-minute REST quote check runs only on November 19, 2026 during the US regular session, 9:30 a.m.–4:00 p.m. America/New_York. This quote polling is a fallback for prices/thresholds; **first-trade confirmation is based on an actual provider trade event**, not a quote, listing record or indicative price.
@@ -45,3 +45,6 @@ Yahoo Finance does not offer a documented public real-time developer API. Its we
 
 ## Portfolio assumptions and risk
 Default editable holding: 38 shares at USD 83.00/share. Fixed FX: NPR 149.21/USD. These are assumptions; verify allocation, fills, fees and average cost in Revolut. The planner does not place orders or connect to Revolut. IPO opening prices can be highly volatile, with wide spreads and trading halts. Consider limit orders and confirm current broker availability, order rules and market status before trading.
+
+## Yahoo Finance API note
+Yahoo Finance does not publish a documented public developer API for real-time equity streaming. Some third-party libraries call undocumented Yahoo endpoints; those can change, be rate-limited, and are not a dependable licensed real-time execution feed. There is no official Yahoo API key to request for this setup. Keep Finnhub as the market-data source and confirm its Nasdaq real-time entitlements instead. See Yahoo's public developer/API information and its terms before using any unofficial collection method.
