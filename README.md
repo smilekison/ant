@@ -60,3 +60,7 @@ The dashboard also displays portfolio market value, invested cost, unrealised P/
 
 ## Currency converter
 The dashboard includes an interactive multi-currency converter with editable amounts, currency selectors and a swap control. The server retrieves supported currencies from Frankfurter and reference rates from its v2 rates endpoint. Currency lists are cached for 24 hours and rates per base currency for one hour. The converter displays the rate date and source. These are reference rates, not executable bank, card or broker rates. The existing USD/NPR portfolio valuation remains fixed at NPR 149.21 per USD.
+
+
+## Chart controls and selling planner
+The live chart buffers incoming trade events and redraws every 3 or 5 seconds, selectable in the chart header. The price-axis labels are rounded to whole USD values for readability. The old scenario calculator and single-price selling calculator have been removed. The Selling Planner supports multiple hypothetical limit orders, calculates combined proceeds, allocated average-cost basis, estimated realised profit/loss, fees, and remaining shares. It is a planning tool only and does not submit orders.
