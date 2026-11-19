@@ -286,7 +286,7 @@ $('paperSubmit').addEventListener('click',async()=>{if(!paperPreviewDraft)return
 $('paperRefresh').addEventListener('click',refreshPaperTrading);
 $('paperBotStart').addEventListener('click',async()=>{try{const body={action:'START',side:$('paperBotSide').value,condition:$('paperBotCondition').value,quantity:Number($('paperBotQty').value),triggerPrice:Number($('paperBotPrice').value)};await api('/api/trading/bot',{method:'POST',body:JSON.stringify(body)});await refreshPaperTrading();}catch(e){alert(e.message);}});
 $('paperBotStop').addEventListener('click',async()=>{try{await api('/api/trading/bot',{method:'POST',body:JSON.stringify({action:'STOP'})});await refreshPaperTrading();}catch(e){alert(e.message);}});
-$('paperKillSwitch').addEventListener('click',async()=>{try{const active=$('paperKillSwitch').textContent.includes('Disable');await api('/api/trading/kill-switch',{method:'POST',body:JSON.stringify({active})});await refreshPaperTrading();}catch(e){alert(e.message);}});
+$('paperKillSwitch').addEventListener('click',async()=>{try{const active=!$('paperKillSwitch').textContent.includes('Disable');await api('/api/trading/kill-switch',{method:'POST',body:JSON.stringify({active})});await refreshPaperTrading();}catch(e){alert(e.message);}});
 $('paperReset').addEventListener('click',async()=>{if(prompt('Type RESET PAPER ACCOUNT to erase simulated cash, positions and orders:')!=='RESET PAPER ACCOUNT')return;try{await api('/api/trading/reset',{method:'POST',body:JSON.stringify({confirm:'RESET PAPER ACCOUNT'})});await refreshPaperTrading();}catch(e){alert(e.message);}});
 refreshPaperTrading();setInterval(refreshPaperTrading,10000);
 
