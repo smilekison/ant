@@ -49,13 +49,14 @@ function createTradingRouter({ getQuote, symbol }) {
   function realisedToday() {
     return state.orders.filter(o => o.status === 'FILLED' && o.side === 'SELL' && Date.parse(o.filledAt || 0) >= dayStart()).reduce((sum,o) => sum + Number(o.realisedPnl || 0), 0);
   }
+  function dailyPnl() { const p=positionFor(symbol); return realisedToday() + (Number.isFinite(lastPrice) ? p.quantity * (lastPrice - p.averageCost) : 0); }
   function positionFor(sym) {
     return state.positions[sym] || { symbol: sym, quantity: 0, averageCost: 0, realisedPnl: 0 };
   }
   function portfolioSnapshot() {
     const positions = Object.values(state.positions).map(p => ({...p, marketPrice: p.symbol === symbol ? lastPrice : null, marketValue: p.symbol === symbol && lastPrice ? p.quantity * lastPrice : null, unrealisedPnl: p.symbol === symbol && lastPrice ? p.quantity * (lastPrice - p.averageCost) : null }));
     const marketValue = positions.reduce((s,p) => s + (Number(p.marketValue) || 0), 0);
-    return { mode: 'PAPER', cash: state.cash, positions, orders: state.orders.slice(-100).reverse(), bot: state.bot, killSwitch: state.killSwitch, realisedToday: realisedToday(), dailyLossLimit: limits.dailyLossLimit, limits, marketValue, equity: state.cash + marketValue, updatedAt: state.updatedAt };
+    return { mode: 'PAPER', cash: state.cash, positions, orders: state.orders.slice(-100).reverse(), bot: state.bot, killSwitch: state.killSwitch, realisedToday: realisedToday(), dailyPnl: dailyPnl(), dailyLossLimit: limits.dailyLossLimit, limits, marketValue, equity: state.cash + marketValue, updatedAt: state.updatedAt };
   }
   function validate(input) {
     const side = String(input.side || '').toUpperCase();
@@ -79,7 +80,7 @@ function createTradingRouter({ getQuote, symbol }) {
     if (notional > limits.maxOrderNotional) throw Error('Order value exceeds the paper limit of $' + limits.maxOrderNotional.toLocaleString() + '.');
     if (order.side === 'BUY' && order.type === 'MARKET' && notional > state.cash) throw Error('Insufficient paper cash for this market order.');
     if (order.side === 'SELL' && order.quantity > positionFor(order.symbol).quantity) throw Error('Insufficient paper shares for this sell order.');
-    if (realisedToday() <= -limits.dailyLossLimit) throw Error('Daily realised-loss limit reached. Trading is blocked until the next day.');
+    if (dailyPnl() <= -limits.dailyLossLimit) throw Error('Daily realised-loss limit reached. Trading is blocked until the next day.');
     if (state.killSwitch) throw Error('Kill switch is active. Disable it before submitting paper orders.');
     return { ...order, referencePrice: reference, estimatedNotional: notional, estimatedFees: 0, warning: 'Paper simulation only. This does not route to a broker or execute a real trade.' };
   }
@@ -190,7 +191,7 @@ function createTradingRouter({ getQuote, symbol }) {
   });
   router.post('/kill-switch', (req,res) => {
     state.killSwitch = req.body.active !== false;
-    if (state.killSwitch) state.bot.running = false;
+    if (state.killSwitch) { state.bot.running = false; for (const order of state.orders) if (order.status === 'PENDING') { order.status = 'CANCELLED'; order.cancelledAt = new Date().toISOString(); order.reason = 'Cancelled by kill switch.'; } }
     save(); res.json({ state: portfolioSnapshot() });
   });
   router.post('/reset', (req,res) => {
