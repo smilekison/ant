@@ -56,3 +56,7 @@ A five-second quote refresh means the dashboard requests a new snapshot every fi
 
 ## EUR conversion
 The dashboard also displays portfolio market value, invested cost, unrealised P/L and selling-calculator P/L in EUR. The server fetches the USD/EUR reference rate from Frankfurter's v2 API (no API key required) and caches it for one hour. The UI displays the reference-rate date. This is a central-bank/reference rate, not a live executable FX quote; Revolut's actual conversion rate and fees may differ. The existing USD/NPR conversion remains fixed at NPR 149.21 per USD.
+
+
+## Currency converter
+The dashboard includes an interactive multi-currency converter with editable amounts, currency selectors and a swap control. The server retrieves supported currencies from Frankfurter and reference rates from its v2 rates endpoint. Currency lists are cached for 24 hours and rates per base currency for one hour. The converter displays the rate date and source. These are reference rates, not executable bank, card or broker rates. The existing USD/NPR portfolio valuation remains fixed at NPR 149.21 per USD.
