@@ -190,7 +190,7 @@ function parseMathChat(raw){
  const num='(\\d+(?:\\.\\d+)?)';
  let shares=NaN,avg=NaN;
  const shareMatch=text.match(new RegExp(num+'\\s*(?:shares?|shs?)\\b'));
- const avgMatch=text.match(new RegExp('(?:avg(?:erage)?(?:\\s+(?:cost|price))?|cost basis)\\s*(?:of|at|is|:)?\\s*'+num));
+ const avgMatch=text.match(new RegExp('(?:(?:avg|average)(?:\\s+(?:cost|price))?|cost basis)\\s*(?:of|at|is|:)?\\s*'+num));
  if(shareMatch)shares=Number(shareMatch[1]);
  if(avgMatch)avg=Number(avgMatch[1]);
  if(!Number.isFinite(shares))shares=Math.max(0,v('shares'));
