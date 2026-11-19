@@ -1,10 +1,21 @@
 {
-  "name":"anthropic-ipo-portfolio-tracker",
-  "version":"2.0.0",
-  "private":true,
-  "description":"Server-backed Anthropic ANT portfolio tracker with private market-data credentials.",
-  "main":"server.js",
-  "scripts":{"start":"node server.js","dev":"node --watch server.js","check":"node --check server.js"},
-  "engines":{"node":">=20"},
-  "dependencies":{"dotenv":"^16.4.7","express":"^4.21.2","ws":"^8.18.0"}
+  "name": "anthropic-ipo-portfolio-tracker",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Server-backed Anthropic ANT portfolio tracker with private market-data credentials.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node --check server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ws": "^8.18.0",
+    "chart.js": "^4.4.7"
+  }
 }
