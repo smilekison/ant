@@ -68,3 +68,27 @@ The live chart buffers incoming trade events and redraws every 3 or 5 seconds, s
 
 ## Live portfolio P/L and trade pressure
 Portfolio unrealised P/L is recalculated on every valid incoming Finnhub trade tick. The latest quote snapshot remains the fallback when trade ticks are unavailable and updates the same calculation. The portfolio card shows the update time and data source. Buying/selling pressure is estimated from tick-rule trade direction and volume, with rolling 60-second and 5-minute views; it is not confirmed aggressor-side volume or full order-book depth.
+
+## Paper trading terminal
+The dashboard includes a separate server-side paper account with simulated USD 100,000 starting cash. It is not linked to the manually entered portfolio assumptions. It supports:
+- Market and limit paper orders with a mandatory preview and confirmation.
+- Simulated fills, average-cost positions, cash/equity, realised and unrealised P/L.
+- Pending limit-order cancellation and order history.
+- A one-shot price-trigger bot that can submit one simulated market order, then stops.
+- A kill switch that stops the bot, blocks new orders and cancels pending paper orders.
+- Server-enforced maximum order quantity, maximum order notional and daily loss guard.
+
+Paper market orders fill at the latest Finnhub quote retrieved by the server. Limit orders are simulated when a later Finnhub quote snapshot or trade tick crosses the limit; this is not exchange queue simulation and does not model partial fills, spreads, slippage, routing, taxes or commissions. The bot is a simple one-shot trigger, not an autonomous strategy or recommendation. The paper account is independent of any broker account and all simulated activity must be treated as test data.
+
+The server persists the paper account in `DATA_DIR/paper-trading.json` (or `./data/paper-trading.json` if DATA_DIR is unset). Set DATA_DIR to a private persistent volume outside the application checkout, restrict filesystem access, and include that volume in your backup plan. Do not commit the generated state file.
+
+### Paper trading environment settings
+| Variable | Default | Purpose |
+|---|---:|---|
+| `PAPER_MAX_ORDER_QTY` | 1000 | Maximum shares per order |
+| `PAPER_MAX_ORDER_NOTIONAL` | 100000 | Maximum estimated USD order value |
+| `PAPER_DAILY_LOSS_LIMIT` | 1000 | Blocks new paper orders when the combined daily P/L guard reaches this loss |
+| `DATA_DIR` | `./data` | Private persistent state directory |
+
+### Live brokerage integration
+No live broker adapter is enabled. The current terminal is paper-only; it does not connect to Interactive Brokers, Alpaca, Tradier or Revolut, and cannot place real orders. A live integration requires a supported brokerage account, broker-side API permissions, account approval, secure credential configuration, broker-specific order/position reconciliation, and separate end-to-end testing. Do not enable live trading by changing a frontend setting.
