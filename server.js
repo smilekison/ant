@@ -146,7 +146,7 @@ app.get('/api/fx', async (req, res) => {
       if (!response.ok) throw Error('FX provider returned HTTP ' + response.status);
       const data = await response.json();
       if (!Array.isArray(data)) throw Error('Invalid FX rates response');
-      const rates = Object.fromEntries(data.map(item => [item.currency, Number(item.rate)]));
+      const rates = Object.fromEntries(data.map(item => [item.quote, Number(item.rate)]));
       if (!Object.keys(rates).length) throw Error('No reference rates available for ' + base);
       cached = { base, date: data[0].date, rates, fetchedAt: Date.now() };
       fxCache.set(base, cached);
