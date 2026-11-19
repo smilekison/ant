@@ -64,3 +64,7 @@ The dashboard includes an interactive multi-currency converter with editable amo
 
 ## Chart controls and selling planner
 The live chart buffers incoming trade events and redraws every 3 or 5 seconds, selectable in the chart header. The price-axis labels are rounded to whole USD values for readability. The old scenario calculator and single-price selling calculator have been removed. The Selling Planner supports multiple hypothetical limit orders, calculates combined proceeds, allocated average-cost basis, estimated realised profit/loss, fees, and remaining shares. It is a planning tool only and does not submit orders.
+
+
+## Live portfolio P/L and trade pressure
+Portfolio unrealised P/L is recalculated on every valid incoming Finnhub trade tick. The latest quote snapshot remains the fallback when trade ticks are unavailable and updates the same calculation. The portfolio card shows the update time and data source. Buying/selling pressure is estimated from tick-rule trade direction and volume, with rolling 60-second and 5-minute views; it is not confirmed aggressor-side volume or full order-book depth.
