@@ -55,11 +55,35 @@ async function getQuote(symbol = DEFAULT_SYMBOL) {
   return data;
 }
 
+
+const extendedTrades = new Map();
+function usSession(at = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
+  const values = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  const weekday = !['Sat', 'Sun'].includes(values.weekday);
+  const minutes = Number(values.hour) * 60 + Number(values.minute);
+  if (!weekday) return 'Closed';
+  if (minutes >= 240 && minutes < 570) return 'Pre-market';
+  if (minutes >= 570 && minutes < 960) return 'Regular session';
+  if (minutes >= 960 && minutes < 1200) return 'After-hours';
+  return 'Closed';
+}
+function recordExtendedTrade(symbol, trade) {
+  const price = Number(trade.p), timestamp = Number(trade.t) || Date.now();
+  if (!Number.isFinite(price) || price <= 0) return;
+  const session = usSession(new Date(timestamp));
+  if (session !== 'Pre-market' && session !== 'After-hours') return;
+  const saved = extendedTrades.get(symbol) || {};
+  saved[session === 'Pre-market' ? 'premarket' : 'afterhours'] = { price, timestamp: new Date(timestamp).toISOString() };
+  extendedTrades.set(symbol, saved);
+}
+
 function markTrade(trade) {
   const price = Number(trade.p);
   const timestamp = Number(trade.t) || Date.now();
   if (!Number.isFinite(price) || price <= 0) return;
   lastPrice = price;
+  recordExtendedTrade(DEFAULT_SYMBOL, trade);
   if (!firstTrade) {
     firstTrade = { price, timestamp: new Date(timestamp).toISOString(), provider: 'Finnhub trade WebSocket' };
     broadcast({ type: 'first_trade', price, timestamp: firstTrade.timestamp });
@@ -161,6 +185,34 @@ app.get('/api/fx', async (req, res) => {
     res.status(502).json({ error: 'Reference exchange rates unavailable.' });
   }
 });
+
+app.get('/api/extended-hours', rateLimit, async (req, res) => {
+  let symbol;
+  try { symbol = symbolOf(req.query.symbol); } catch (error) { return res.status(400).json({ error: error.message }); }
+  try {
+    const saved = extendedTrades.get(symbol) || {};
+    let previousClose = null;
+    try {
+      const q = await getQuote(symbol);
+      previousClose = Number(q.pc) > 0 ? Number(q.pc) : null;
+    } catch (error) {
+      console.warn('Extended-hours reference quote unavailable:', error.message);
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      symbol,
+      session: usSession(),
+      feedAvailable: streamConnected,
+      premarket: saved.premarket || null,
+      afterhours: saved.afterhours || null,
+      previousClose,
+      note: 'Finnhub WebSocket trade prints are shown when supplied for this symbol. Extended-hours coverage depends on Finnhub symbol coverage, subscription and exchange feed. Values are last observed trades, not executable quotes; data is held in memory and resets when the server restarts.'
+    });
+  } catch (error) {
+    res.status(502).json({ error: 'Extended-hours data unavailable.' });
+  }
+});
+
 app.get('/api/status', (_req, res) => res.json({
   tradingLive: Boolean(firstTrade),
   firstTrade,
